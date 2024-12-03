@@ -8,8 +8,9 @@ from pydantic import BaseModel
 from typing import List, Optional
 from openai import AsyncOpenAI
 from dotenv import load_dotenv
-import tiktoken
 import uvicorn
+
+from utils.function_registry import FunctionRegistry
 
 # Last miljøvariabler fra .env
 load_dotenv()
@@ -38,14 +39,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Token grenser for modeller
-MODEL_TOKEN_LIMITS = {
-    'gpt-4-1106-preview': 128000,
-    'gpt-4': 8192,
-    'gpt-4-32k': 32768,
-    'gpt-3.5-turbo': 4096,
-    'gpt-3.5-turbo-16k': 16384
-}
+# Initialiser function registry
+function_registry = FunctionRegistry()
 
 # Pydantic-modeller
 class Message(BaseModel):
@@ -60,36 +55,19 @@ class ChatCompletionRequest(BaseModel):
     stream: Optional[bool] = False
     user_id: Optional[str] = None
 
-def count_tokens(text: str, model: str) -> int:
-    """Beregn antall tokens i teksten"""
+async def stream_function_response(response: str):
+    """Stream en funksjonsrespons i riktig format"""
     try:
-        encoding = tiktoken.encoding_for_model(model)
-        return len(encoding.encode(text))
-    except Exception:
-        return len(text.split()) * 2  # Enkel fallback
+        # Send respons-content
+        yield f'data: {json.dumps({"choices": [{"delta": {"role": "assistant", "content": response}}]})}\n\n'
+        # Send [DONE] markør
+        yield "data: [DONE]\n\n"
+    except Exception as e:
+        logger.error(f"Streaming error: {str(e)}")
+        yield f'data: {json.dumps({"error": str(e)})}\n\n'
 
-def adjust_max_tokens(request_data: dict) -> dict:
-    """Juster max_tokens basert på modell og innhold"""
-    model = request_data["model"]
-    model_limit = MODEL_TOKEN_LIMITS.get(model, 4096)
-    
-    # Beregn tokens brukt i meldinger
-    total_tokens = sum(count_tokens(msg["content"], model) 
-                      for msg in request_data["messages"])
-    
-    # Beregn tilgjengelige tokens
-    available_tokens = model_limit - total_tokens - 50  # Buffer på 50 tokens
-    
-    # Sett max_tokens
-    if "max_tokens" not in request_data or request_data["max_tokens"] is None:
-        request_data["max_tokens"] = min(available_tokens, 4096)
-    else:
-        request_data["max_tokens"] = min(request_data["max_tokens"], available_tokens)
-    
-    logger.info(f"Justerte max_tokens til {request_data['max_tokens']}")
-    return request_data
-
-async def event_stream(completion):
+async def stream_gpt_response(completion):
+    """Stream GPT respons"""
     try:
         async for chunk in completion:
             chunk_dict = chunk.model_dump()
@@ -97,23 +75,41 @@ async def event_stream(completion):
         yield "data: [DONE]\n\n"
     except Exception as e:
         logger.error(f"Streaming error: {str(e)}")
-        yield f"data: {json.dumps({'error': str(e)})}\n\n"
+        yield f'data: {json.dumps({"error": str(e)})}\n\n'
 
 @app.post("/v1/chat/completions")
 async def create_chat_completion(request: ChatCompletionRequest):
     try:
+        # Sjekk om dette er en funksjonskommando
+        last_message = request.messages[-1].content
+        function_response = await function_registry.handle_command(last_message)
+        
+        if function_response:
+            logger.info(f"Funksjon utført, returnerer: {function_response}")
+            # Returner funksjonssvar
+            if request.stream:
+                return StreamingResponse(
+                    stream_function_response(function_response),
+                    media_type="text/event-stream"
+                )
+            else:
+                return {
+                    "choices": [{
+                        "message": {"role": "assistant", "content": function_response}
+                    }]
+                }
+        
+        # Hvis ingen funksjon matcher, send til GPT
+        logger.info("Ingen funksjon matchet, sender til GPT")
         request_data = request.dict(exclude_none=True)
         if "user_id" in request_data:
             request_data["user"] = request_data.pop("user_id")
-            
-        # Juster max_tokens før sending
-        request_data = adjust_max_tokens(request_data)
 
         completion = await client.chat.completions.create(**request_data)
-
+        
         if request_data.get("stream", False):
             return StreamingResponse(
-                event_stream(completion),
+                stream_gpt_response(completion),
                 media_type="text/event-stream"
             )
         
@@ -125,7 +121,30 @@ async def create_chat_completion(request: ChatCompletionRequest):
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy"}
+    """Endepunkt for helse-sjekk"""
+    return {
+        "status": "healthy",
+        "functions_loaded": len(function_registry.get_all_functions())
+    }
+
+@app.get("/functions")
+async def list_functions():
+    """List alle tilgjengelige funksjoner"""
+    functions = function_registry.get_all_functions()
+    return {
+        name: {
+            "descriptions": func.descriptions
+        } for name, func in functions.items()
+    }
+
+@app.post("/functions/reload")
+async def reload_functions():
+    """Last inn funksjonene på nytt"""
+    function_registry.reload_functions()
+    return {
+        "status": "success",
+        "functions_loaded": len(function_registry.get_all_functions())
+    }
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
