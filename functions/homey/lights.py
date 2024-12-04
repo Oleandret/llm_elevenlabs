@@ -5,9 +5,9 @@ from functions.function_base import BaseFunction
 
 class HomeyLights(BaseFunction):
     def __init__(self):
-        self.api_url = os.getenv("HOMEY_API_URL")
+        self.api_url = os.getenv("HOMEY_API_URL").rstrip('/')  # Fjerner trailing slash
         self.token = os.getenv("HOMEY_API_TOKEN")
-        self.device_id = "D0603BEE9883_0"  # Din spesifikke enhets-ID
+        self.device_id = "D0603BEE9883_0"
 
     @property
     def name(self) -> str:
@@ -51,7 +51,6 @@ class HomeyLights(BaseFunction):
                     return "Taklyset i stuen er slått av"
                 
                 elif "dimme" in command:
-                    # Standard dimmenivå er 50%
                     brightness = 0.5
                     
                     await client.put(
@@ -62,4 +61,4 @@ class HomeyLights(BaseFunction):
                     return f"Taklyset er dimmet til {int(brightness * 100)}%"
                 
             except httpx.RequestError as e:
-                return f"Kunde ikke styre taklyset: {str(e)}"
+                return f"Kunne ikke styre taklyset: {str(e)}"
