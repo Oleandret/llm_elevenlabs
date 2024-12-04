@@ -12,25 +12,20 @@ import uvicorn
 
 from utils.function_registry import FunctionRegistry
 
-# Last miljøvariabler fra .env
 load_dotenv()
 
-# Sett opp logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-# Initialiser OpenAI klient
 client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 if not client.api_key:
     raise ValueError("OPENAI_API_KEY mangler i miljøvariabler.")
 
-# Initialiser FastAPI-appen
 app = FastAPI()
 
-# Legg til CORS-middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -39,10 +34,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialiser function registry
 function_registry = FunctionRegistry()
 
-# Pydantic-modeller
 class Message(BaseModel):
     role: str
     content: str
@@ -55,19 +48,34 @@ class ChatCompletionRequest(BaseModel):
     stream: Optional[bool] = False
     user_id: Optional[str] = None
 
+async def adjust_max_tokens(request_data: dict) -> dict:
+    model_limits = {
+        'gpt-4-1106-preview': 4096,
+        'gpt-4': 4096,
+        'gpt-4-32k': 4096,
+        'gpt-3.5-turbo': 4096,
+        'gpt-3.5-turbo-16k': 4096
+    }
+    
+    model = request_data['model']
+    max_completion_tokens = model_limits.get(model, 4096)
+    
+    if 'max_tokens' not in request_data or request_data['max_tokens'] is None:
+        request_data['max_tokens'] = max_completion_tokens
+    else:
+        request_data['max_tokens'] = min(request_data['max_tokens'], max_completion_tokens)
+    
+    return request_data
+
 async def stream_function_response(response: str):
-    """Stream en funksjonsrespons i riktig format"""
     try:
-        # Send respons-content
         yield f'data: {json.dumps({"choices": [{"delta": {"role": "assistant", "content": response}}]})}\n\n'
-        # Send [DONE] markør
         yield "data: [DONE]\n\n"
     except Exception as e:
         logger.error(f"Streaming error: {str(e)}")
         yield f'data: {json.dumps({"error": str(e)})}\n\n'
 
 async def stream_gpt_response(completion):
-    """Stream GPT respons"""
     try:
         async for chunk in completion:
             chunk_dict = chunk.model_dump()
@@ -80,13 +88,11 @@ async def stream_gpt_response(completion):
 @app.post("/v1/chat/completions")
 async def create_chat_completion(request: ChatCompletionRequest):
     try:
-        # Sjekk om dette er en funksjonskommando
         last_message = request.messages[-1].content
         function_response = await function_registry.handle_command(last_message)
         
         if function_response:
             logger.info(f"Funksjon utført, returnerer: {function_response}")
-            # Returner funksjonssvar
             if request.stream:
                 return StreamingResponse(
                     stream_function_response(function_response),
@@ -99,12 +105,12 @@ async def create_chat_completion(request: ChatCompletionRequest):
                     }]
                 }
         
-        # Hvis ingen funksjon matcher, send til GPT
         logger.info("Ingen funksjon matchet, sender til GPT")
         request_data = request.dict(exclude_none=True)
         if "user_id" in request_data:
             request_data["user"] = request_data.pop("user_id")
 
+        request_data = await adjust_max_tokens(request_data)
         completion = await client.chat.completions.create(**request_data)
         
         if request_data.get("stream", False):
@@ -121,7 +127,6 @@ async def create_chat_completion(request: ChatCompletionRequest):
 
 @app.get("/health")
 async def health_check():
-    """Endepunkt for helse-sjekk"""
     return {
         "status": "healthy",
         "functions_loaded": len(function_registry.get_all_functions())
@@ -129,7 +134,6 @@ async def health_check():
 
 @app.get("/functions")
 async def list_functions():
-    """List alle tilgjengelige funksjoner"""
     functions = function_registry.get_all_functions()
     return {
         name: {
@@ -139,7 +143,6 @@ async def list_functions():
 
 @app.post("/functions/reload")
 async def reload_functions():
-    """Last inn funksjonene på nytt"""
     function_registry.reload_functions()
     return {
         "status": "success",
