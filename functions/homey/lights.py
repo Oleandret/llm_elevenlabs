@@ -1,7 +1,7 @@
 import os
 import httpx
 from typing import Optional, Dict, List
-from ...function_base import BaseFunction
+from functions.function_base import BaseFunction
 
 class HomeyLights(BaseFunction):
     def __init__(self):
