@@ -62,4 +62,4 @@ class HomeyLights(BaseFunction):
                     return f"Taklyset er dimmet til {int(brightness * 100)}%"
                 
             except httpx.RequestError as e:
-                return f"Kunne ikke styre taklyset: {str(e)}"
+                return f"Kunde ikke styre taklyset: {str(e)}"
