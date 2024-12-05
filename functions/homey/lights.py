@@ -8,6 +8,7 @@ class HomeyLights(BaseFunction):
         self.base_url = "https://64f5c8926da3f17a12bc9c7c.connect.athom.com/api/manager/devices/device"
         self.token = os.getenv("HOMEY_API_TOKEN")
         self.device_id = "77535dea-499b-4a63-9e4b-3e3184763ece"
+        self.room = "stuen i hovedetasjen"
 
     @property
     def name(self) -> str:
@@ -16,14 +17,69 @@ class HomeyLights(BaseFunction):
     @property
     def descriptions(self) -> List[str]:
         return [
-            "slå på taklys",
-            "skru på taklys",
-            "slå av taklys",
-            "skru av taklys",
-            "dimme taklys",
-            "dimme taklyset",
-            "sett taklys"
+            # Slå av kommandoer
+            "slå av taklys", "skru av taklys", 
+            "slå av lys", "skru av lys",
+            "slukk lys", "slukk taklys",
+            "av med lys", "av med taklys",
+            "lys av", "taklys av",
+            "slå av", "skru av",
+            
+            # Slå på kommandoer
+            "slå på taklys", "skru på taklys",
+            "slå på lys", "skru på lys",
+            "tenn lys", "tenn taklys",
+            "på med lys", "på med taklys",
+            "lys på", "taklys på",
+            "slå på", "skru på",
+            
+            # Dimming kommandoer
+            "dimme taklys", "dimme lys",
+            "dim taklys", "dim lys",
+            "sett lys", "sett taklys",
+            "juster lys", "juster taklys",
+            "endre lysstyrke"
         ]
+
+    def _is_stue_context(self, command: str) -> bool:
+        """Sjekker om kommandoen refererer til stuen"""
+        stue_referanser = ["stue", "stuen", "hovedetasje", "nede", "første"]
+        return any(ref in command.lower() for ref in stue_referanser)
+
+    def _get_command_type(self, command: str) -> tuple[str, float]:
+        """
+        Analyserer kommandoen og returnerer type og eventuell dimming-verdi
+        Returns: (command_type, dim_value)
+        command_type kan være: 'on', 'off', 'dim', 'unknown'
+        """
+        command = command.lower()
+        
+        # Av-kommandoer
+        if any(phrase in command for phrase in ["slå av", "skru av", "slukk", "av med", "lys av", "taklys av"]):
+            return 'off', 0.0
+
+        # På-kommandoer
+        if any(phrase in command for phrase in ["slå på", "skru på", "tenn", "på med", "lys på", "taklys på"]):
+            return 'on', 1.0
+
+        # Dimming-kommandoer
+        if any(phrase in command for phrase in ["dimme", "dim", "sett", "juster", "endre", "styrke"]):
+            # Se etter prosentverdier
+            for num in range(0, 101):
+                if f"{num}%" in command or f"{num} prosent" in command:
+                    return 'dim', num / 100
+                    
+            # Se etter beskrivende ord
+            if "svakt" in command or "svak" in command or "lite" in command:
+                return 'dim', 0.2
+            elif "middels" in command:
+                return 'dim', 0.5
+            elif "sterkt" in command or "sterk" in command or "mye" in command:
+                return 'dim', 0.8
+            else:
+                return 'dim', 0.5  # standard verdi
+
+        return 'unknown', 0.0
 
     async def execute(self, command: str, params: Optional[Dict] = None) -> str:
         headers = {
@@ -31,44 +87,31 @@ class HomeyLights(BaseFunction):
             "Content-Type": "application/json"
         }
 
-        command = command.lower()
+        # Hvis rommet ikke er spesifisert og kommandoen ikke inneholder referanse til stuen
+        if not self._is_stue_context(command):
+            return f"Vil du styre lyset i {self.room}? Vennligst spesifiser."
+
+        command_type, dim_value = self._get_command_type(command)
         
         async with httpx.AsyncClient() as client:
             try:
-                if "slå på" in command or "skru på" in command:
+                if command_type == 'on':
                     url = f"{self.base_url}/{self.device_id}/capability/onoff"
-                    await client.put(
-                        url,
-                        headers=headers,
-                        json={"value": True}
-                    )
-                    return "Taklyset i stuen er slått på"
+                    await client.put(url, headers=headers, json={"value": True})
+                    return f"Taklyset i {self.room} er slått på"
                     
-                elif "slå av" in command or "skru av" in command:
+                elif command_type == 'off':
                     url = f"{self.base_url}/{self.device_id}/capability/onoff"
-                    await client.put(
-                        url,
-                        headers=headers,
-                        json={"value": False}
-                    )
-                    return "Taklyset i stuen er slått av"
+                    await client.put(url, headers=headers, json={"value": False})
+                    return f"Taklyset i {self.room} er slått av"
                 
-                elif "dimme" in command or ("sett" in command and "prosent" in command):
-                    brightness = 0.5  # Standard 50%
-                    
-                    # Sjekk for spesifikke prosenter i kommandoen
-                    for num in range(1, 101):
-                        if f"{num}%" in command or f"{num} prosent" in command:
-                            brightness = num / 100
-                            break
-                    
+                elif command_type == 'dim':
                     url = f"{self.base_url}/{self.device_id}/capability/dim"
-                    await client.put(
-                        url,
-                        headers=headers,
-                        json={"value": brightness}
-                    )
-                    return f"Taklyset er satt til {int(brightness * 100)}%"
+                    await client.put(url, headers=headers, json={"value": dim_value})
+                    return f"Taklyset i {self.room} er satt til {int(dim_value * 100)}%"
+                
+                else:
+                    return f"Beklager, jeg forstod ikke kommandoen. Vil du slå av, slå på, eller dimme lyset i {self.room}?"
                 
             except httpx.RequestError as e:
-                return f"Kunne ikke styre taklyset: {str(e)}"
+                return f"Kunne ikke styre taklyset i {self.room}: {str(e)}"
