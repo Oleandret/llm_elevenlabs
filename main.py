@@ -12,20 +12,25 @@ import uvicorn
 
 from utils.function_registry import FunctionRegistry
 
+# Last miljøvariabler fra .env
 load_dotenv()
 
+# Sett opp logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
+# Initialiser OpenAI klient
 client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 if not client.api_key:
     raise ValueError("OPENAI_API_KEY mangler i miljøvariabler.")
 
+# Initialiser FastAPI-appen
 app = FastAPI()
 
+# Legg til CORS-middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -34,6 +39,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Initialiser function registry
 function_registry = FunctionRegistry()
 
 class Message(BaseModel):
@@ -67,6 +73,22 @@ async def adjust_max_tokens(request_data: dict) -> dict:
     
     return request_data
 
+async def identify_command_type(message: str) -> bool:
+    """
+    Identifiserer om en melding sannsynligvis er en kommando for smarthjem
+    """
+    # Nøkkelord som indikerer smarthjem-kommandoer
+    command_indicators = [
+        "lys", "taklys", "lampe", "lamper", 
+        "slå på", "slå av", "skru på", "skru av",
+        "dimme", "dim", "justere", "endre",
+        "stue", "stuen", "rom",
+        "prosent", "%"
+    ]
+    
+    message = message.lower()
+    return any(indicator in message for indicator in command_indicators)
+
 async def stream_function_response(response: str):
     try:
         yield f'data: {json.dumps({"choices": [{"delta": {"role": "assistant", "content": response}}]})}\n\n'
@@ -89,23 +111,30 @@ async def stream_gpt_response(completion):
 async def create_chat_completion(request: ChatCompletionRequest):
     try:
         last_message = request.messages[-1].content
-        function_response = await function_registry.handle_command(last_message)
         
-        if function_response:
-            logger.info(f"Funksjon utført, returnerer: {function_response}")
-            if request.stream:
-                return StreamingResponse(
-                    stream_function_response(function_response),
-                    media_type="text/event-stream"
-                )
-            else:
-                return {
-                    "choices": [{
-                        "message": {"role": "assistant", "content": function_response}
-                    }]
-                }
+        # Sjekk først om dette ser ut som en kommando
+        is_command = await identify_command_type(last_message)
         
-        logger.info("Ingen funksjon matchet, sender til GPT")
+        if is_command:
+            logger.info(f"Melding identifisert som mulig kommando: {last_message}")
+            function_response = await function_registry.handle_command(last_message)
+            
+            if function_response:
+                logger.info(f"Funksjon utført, returnerer: {function_response}")
+                if request.stream:
+                    return StreamingResponse(
+                        stream_function_response(function_response),
+                        media_type="text/event-stream"
+                    )
+                else:
+                    return {
+                        "choices": [{
+                            "message": {"role": "assistant", "content": function_response}
+                        }]
+                    }
+        
+        # Hvis ikke en kommando eller ingen funksjon matchet, send til GPT
+        logger.info("Sender til GPT")
         request_data = request.dict(exclude_none=True)
         if "user_id" in request_data:
             request_data["user"] = request_data.pop("user_id")
@@ -127,13 +156,18 @@ async def create_chat_completion(request: ChatCompletionRequest):
 
 @app.get("/health")
 async def health_check():
+    """Endepunkt for helse-sjekk"""
+    functions = function_registry.get_all_functions()
+    function_names = [name for name in functions.keys()]
     return {
         "status": "healthy",
-        "functions_loaded": len(function_registry.get_all_functions())
+        "functions_loaded": len(functions),
+        "available_functions": function_names
     }
 
 @app.get("/functions")
 async def list_functions():
+    """List alle tilgjengelige funksjoner"""
     functions = function_registry.get_all_functions()
     return {
         name: {
@@ -143,6 +177,7 @@ async def list_functions():
 
 @app.post("/functions/reload")
 async def reload_functions():
+    """Last inn funksjonene på nytt"""
     function_registry.reload_functions()
     return {
         "status": "success",
