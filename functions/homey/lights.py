@@ -5,9 +5,9 @@ from functions.function_base import BaseFunction
 
 class HomeyLights(BaseFunction):
     def __init__(self):
-        self.api_url = os.getenv("HOMEY_API_URL", "https://64f5c8926da3f17a12bc9c7c.connect.athom.com/api/manager/devices/device")
+        self.base_url = "https://64f5c8926da3f17a12bc9c7c.connect.athom.com/api/manager/devices/device"
         self.token = os.getenv("HOMEY_API_TOKEN")
-        self.device_id = "77535dea-499b-4a63-9e4b-3e3184763ece"  # ID for taklys i stuen
+        self.device_id = "77535dea-499b-4a63-9e4b-3e3184763ece"
 
     @property
     def name(self) -> str:
@@ -21,7 +21,8 @@ class HomeyLights(BaseFunction):
             "slå av taklys",
             "skru av taklys",
             "dimme taklys",
-            "dimme taklyset"
+            "dimme taklyset",
+            "sett taklys"
         ]
 
     async def execute(self, command: str, params: Optional[Dict] = None) -> str:
@@ -35,7 +36,7 @@ class HomeyLights(BaseFunction):
         async with httpx.AsyncClient() as client:
             try:
                 if "slå på" in command or "skru på" in command:
-                    url = f"{self.api_url}/{self.device_id}/capability/onoff"
+                    url = f"{self.base_url}/{self.device_id}/capability/onoff"
                     await client.put(
                         url,
                         headers=headers,
@@ -44,7 +45,7 @@ class HomeyLights(BaseFunction):
                     return "Taklyset i stuen er slått på"
                     
                 elif "slå av" in command or "skru av" in command:
-                    url = f"{self.api_url}/{self.device_id}/capability/onoff"
+                    url = f"{self.base_url}/{self.device_id}/capability/onoff"
                     await client.put(
                         url,
                         headers=headers,
@@ -52,22 +53,22 @@ class HomeyLights(BaseFunction):
                     )
                     return "Taklyset i stuen er slått av"
                 
-                elif "dimme" in command:
+                elif "dimme" in command or ("sett" in command and "prosent" in command):
                     brightness = 0.5  # Standard 50%
                     
                     # Sjekk for spesifikke prosenter i kommandoen
-                    for num in range(10, 101, 10):  # 10, 20, 30, ..., 100
+                    for num in range(1, 101):
                         if f"{num}%" in command or f"{num} prosent" in command:
                             brightness = num / 100
                             break
                     
-                    url = f"{self.api_url}/{self.device_id}/capability/dim"
+                    url = f"{self.base_url}/{self.device_id}/capability/dim"
                     await client.put(
                         url,
                         headers=headers,
                         json={"value": brightness}
                     )
-                    return f"Taklyset er dimmet til {int(brightness * 100)}%"
+                    return f"Taklyset er satt til {int(brightness * 100)}%"
                 
             except httpx.RequestError as e:
                 return f"Kunne ikke styre taklyset: {str(e)}"
