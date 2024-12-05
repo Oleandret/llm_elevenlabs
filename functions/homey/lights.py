@@ -5,9 +5,9 @@ from functions.function_base import BaseFunction
 
 class HomeyLights(BaseFunction):
     def __init__(self):
-        self.api_url = os.getenv("HOMEY_API_URL").rstrip('/')  # Fjerner trailing slash
+        self.api_url = os.getenv("HOMEY_API_URL", "https://64f5c8926da3f17a12bc9c7c.connect.athom.com/api/manager/devices/device")
         self.token = os.getenv("HOMEY_API_TOKEN")
-        self.device_id = "D0603BEE9883_0"
+        self.device_id = "77535dea-499b-4a63-9e4b-3e3184763ece"  # ID for taklys i stuen
 
     @property
     def name(self) -> str:
@@ -35,26 +35,35 @@ class HomeyLights(BaseFunction):
         async with httpx.AsyncClient() as client:
             try:
                 if "slå på" in command or "skru på" in command:
+                    url = f"{self.api_url}/{self.device_id}/capability/onoff"
                     await client.put(
-                        f"{self.api_url}/devices/{self.device_id}/capabilities/onoff",
+                        url,
                         headers=headers,
                         json={"value": True}
                     )
                     return "Taklyset i stuen er slått på"
                     
                 elif "slå av" in command or "skru av" in command:
+                    url = f"{self.api_url}/{self.device_id}/capability/onoff"
                     await client.put(
-                        f"{self.api_url}/devices/{self.device_id}/capabilities/onoff",
+                        url,
                         headers=headers,
                         json={"value": False}
                     )
                     return "Taklyset i stuen er slått av"
                 
                 elif "dimme" in command:
-                    brightness = 0.5
+                    brightness = 0.5  # Standard 50%
                     
+                    # Sjekk for spesifikke prosenter i kommandoen
+                    for num in range(10, 101, 10):  # 10, 20, 30, ..., 100
+                        if f"{num}%" in command or f"{num} prosent" in command:
+                            brightness = num / 100
+                            break
+                    
+                    url = f"{self.api_url}/{self.device_id}/capability/dim"
                     await client.put(
-                        f"{self.api_url}/devices/{self.device_id}/capabilities/dim",
+                        url,
                         headers=headers,
                         json={"value": brightness}
                     )
