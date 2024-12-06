@@ -1,12 +1,11 @@
 import os
 import json
 import httpx
-import asyncio
 import logging
 from datetime import datetime
 from pathlib import Path
 from functions.function_base import BaseFunction
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Union
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +17,6 @@ class HomeyFlows(BaseFunction):
         self.flows_file.parent.mkdir(parents=True, exist_ok=True)
         self.last_update = None
         self.flows = self.load_flows()
-        self.update_task = None
 
     @property
     def name(self) -> str:
@@ -32,7 +30,14 @@ class HomeyFlows(BaseFunction):
             "kjør flow", "start flow"
         ]
         if self.flows:
-            return base_descriptions + [flow["name"].lower() for flow in self.flows]
+            try:
+                flow_names = []
+                for flow in self.flows:
+                    if isinstance(flow, dict) and 'name' in flow:
+                        flow_names.append(flow['name'].lower())
+                return base_descriptions + flow_names
+            except Exception as e:
+                logger.error(f"Feil ved parsing av flow-navn: {e}")
         return base_descriptions
 
     def load_flows(self) -> List[Dict]:
@@ -41,15 +46,28 @@ class HomeyFlows(BaseFunction):
             try:
                 with open(self.flows_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
-                    logger.info(f"Lastet {len(data)} flows fra fil")
-                    return data
+                    if isinstance(data, list):
+                        logger.info(f"Lastet {len(data)} flows fra fil")
+                        return data
+                    else:
+                        logger.error("Ugyldig flow-data format")
+                        return []
             except Exception as e:
                 logger.error(f"Kunne ikke laste flows: {e}")
         return []
 
-    def save_flows(self, flows: List[Dict]):
+    def save_flows(self, flows: Union[List[Dict], Dict]):
         """Lagre flows til fil"""
         try:
+            # Hvis vi får en dictionary med flows som en property
+            if isinstance(flows, dict) and 'flows' in flows:
+                flows = flows['flows']
+            
+            # Sikre at vi har en liste med flows
+            if not isinstance(flows, list):
+                logger.error(f"Ugyldig flow-data format: {type(flows)}")
+                return
+
             with open(self.flows_file, 'w', encoding='utf-8') as f:
                 json.dump(flows, f, indent=2, ensure_ascii=False)
             self.flows = flows
@@ -68,10 +86,16 @@ class HomeyFlows(BaseFunction):
                     headers={"Authorization": f"Bearer {self.token}"}
                 )
                 response.raise_for_status()
-                flows = response.json()
-                logger.info(f"Hentet {len(flows)} flows fra Homey")
-                self.save_flows(flows)
-                return flows
+                
+                # Parse response
+                flows_data = response.json()
+                if isinstance(flows_data, (list, dict)):
+                    logger.info(f"Hentet flows data type: {type(flows_data)}")
+                    self.save_flows(flows_data)
+                    return flows_data
+                else:
+                    logger.error(f"Uventet data format: {type(flows_data)}")
+                    return None
         except Exception as e:
             logger.error(f"Kunne ikke hente flows: {e}")
             return None
@@ -90,14 +114,25 @@ class HomeyFlows(BaseFunction):
         if any(word in command for word in ["vis", "list", "hvilke"]) and any(word in command for word in ["flows", "flow", "automatisering"]):
             if not self.flows:
                 return "Ingen flows funnet."
-            flow_names = [f["name"] for f in self.flows]
-            return f"Tilgjengelige flows: {', '.join(flow_names)}"
+            try:
+                flow_names = []
+                for flow in self.flows:
+                    if isinstance(flow, dict) and 'name' in flow:
+                        flow_names.append(flow['name'])
+                return f"Tilgjengelige flows ({len(flow_names)}):\n" + "\n".join(flow_names)
+            except Exception as e:
+                logger.error(f"Feil ved listing av flows: {e}")
+                return "Beklager, kunne ikke liste flows på grunn av en feil."
 
         # Finn matching flow for kjøring
-        matching_flows = [
-            flow for flow in self.flows 
-            if flow["name"].lower() in command
-        ]
+        matching_flows = []
+        try:
+            for flow in self.flows:
+                if isinstance(flow, dict) and 'name' in flow and flow['name'].lower() in command:
+                    matching_flows.append(flow)
+        except Exception as e:
+            logger.error(f"Feil ved matching av flows: {e}")
+            return "Beklager, kunne ikke søke etter flows på grunn av en feil."
 
         if matching_flows:
             try:
