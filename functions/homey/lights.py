@@ -17,13 +17,15 @@ class HomeyLights(BaseFunction):
     @property
     def descriptions(self) -> List[str]:
         return [
+            # Grunnleggende kommandoer
+            "lys", "taklys", "lampe", "lamper",
+            
             # Slå av kommandoer
             "slå av taklys", "skru av taklys", 
             "slå av lys", "skru av lys",
             "slukk lys", "slukk taklys",
             "av med lys", "av med taklys",
             "lys av", "taklys av",
-            "slå av", "skru av",
             
             # Slå på kommandoer
             "slå på taklys", "skru på taklys",
@@ -31,14 +33,15 @@ class HomeyLights(BaseFunction):
             "tenn lys", "tenn taklys",
             "på med lys", "på med taklys",
             "lys på", "taklys på",
-            "slå på", "skru på",
             
             # Dimming kommandoer
+            "dimme", "dim", "dimming",
             "dimme taklys", "dimme lys",
             "dim taklys", "dim lys",
             "sett lys", "sett taklys",
             "juster lys", "juster taklys",
-            "endre lysstyrke"
+            "endre lysstyrke",
+            "prosent", "%"
         ]
 
     def _is_stue_context(self, command: str) -> bool:
