@@ -3,6 +3,7 @@ import httpx
 from typing import Optional, Dict, List
 from functions.function_base import BaseFunction
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,20 @@ class HomeyLights(BaseFunction):
         logger.info(f"Stue-kontekst {'funnet' if matches else 'ikke funnet'}")
         return matches
 
+    def _extract_percentage(self, command: str) -> Optional[int]:
+        """Ekstraherer prosentverdi fra kommandoen"""
+        # Sjekk for "X prosent" format
+        matches = re.findall(r'(\d+)\s*prosent', command.lower())
+        if matches:
+            return int(matches[0])
+            
+        # Sjekk for "X%" format
+        matches = re.findall(r'(\d+)\s*%', command.lower())
+        if matches:
+            return int(matches[0])
+            
+        return None
+
     def _get_command_type(self, command: str) -> tuple[str, float]:
         """
         Analyserer kommandoen og returnerer type og eventuell dimming-verdi
@@ -79,11 +94,13 @@ class HomeyLights(BaseFunction):
         # Dimming-kommandoer
         if any(phrase in command for phrase in ["dimme", "dim", "sett", "juster", "endre", "styrke", "prosent"]):
             logger.info("Kommandotype: DIM")
-            # Se etter prosentverdier
-            for num in range(0, 101):
-                if f"{num}%" in command or f"{num} prosent" in command:
-                    logger.info(f"Fant dimming-verdi: {num}%")
-                    return 'dim', num / 100
+            
+            # Prøv å finne prosentverdi
+            percent = self._extract_percentage(command)
+            if percent is not None:
+                dim_value = percent / 100.0
+                logger.info(f"Fant dimming-verdi: {percent}%")
+                return 'dim', dim_value
                     
             # Se etter beskrivende ord
             if "svakt" in command or "svak" in command or "lite" in command:
