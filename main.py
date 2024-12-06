@@ -92,13 +92,18 @@ async def identify_command_type(message: str) -> bool:
         "prosent", "%",
         
         # Korte kommandoer
-        "av", "på", "ned", "opp"
+        "av", "på", "ned", "opp",
+        
+        # Flow-relaterte ord
+        "flow", "flows", "flyt", "automation", "automatisering", 
+        "hvilke flows", "kjør flow", "kjør automation", "start flow",
+        "vis flows", "liste flows", "list flows"
     ]
     
     message = message.lower()
     logger.info(f"Sjekker melding for kommandoindikatorer: {message}")
     
-    # Sjekk for prosent-verdier (f.eks. "30 prosent", "30%")
+    # Sjekk for prosent-verdier
     for num in range(101):
         if str(num) + "%" in message.replace(" ", ""):
             logger.info(f"Fant prosentverdi: {num}%")
