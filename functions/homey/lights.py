@@ -2,6 +2,9 @@ import os
 import httpx
 from typing import Optional, Dict, List
 from functions.function_base import BaseFunction
+import logging
+
+logger = logging.getLogger(__name__)
 
 class HomeyLights(BaseFunction):
     def __init__(self):
@@ -9,6 +12,7 @@ class HomeyLights(BaseFunction):
         self.token = os.getenv("HOMEY_API_TOKEN")
         self.device_id = "77535dea-499b-4a63-9e4b-3e3184763ece"
         self.room = "stuen i hovedetasjen"
+        logger.info(f"HomeyLights initialisert for {self.room}")
 
     @property
     def name(self) -> str:
@@ -18,7 +22,7 @@ class HomeyLights(BaseFunction):
     def descriptions(self) -> List[str]:
         return [
             # Grunnleggende kommandoer
-            "lys", "taklys", "lampe", "lamper",
+            "lys", "taklys", "lampe", "lamper", "stuelys",
             
             # Slå av kommandoer
             "slå av taklys", "skru av taklys", 
@@ -41,13 +45,17 @@ class HomeyLights(BaseFunction):
             "sett lys", "sett taklys",
             "juster lys", "juster taklys",
             "endre lysstyrke",
-            "prosent", "%"
+            "prosent", "%", "styrke"
         ]
 
     def _is_stue_context(self, command: str) -> bool:
         """Sjekker om kommandoen refererer til stuen"""
-        stue_referanser = ["stue", "stuen", "hovedetasje", "nede", "første"]
-        return any(ref in command.lower() for ref in stue_referanser)
+        stue_referanser = ["stue", "stuen", "hovedetasje", "nede", "første", "stuelys"]
+        command = command.lower()
+        logger.info(f"Sjekker stue-kontekst for kommando: {command}")
+        matches = any(ref in command for ref in stue_referanser)
+        logger.info(f"Stue-kontekst {'funnet' if matches else 'ikke funnet'}")
+        return matches
 
     def _get_command_type(self, command: str) -> tuple[str, float]:
         """
@@ -56,20 +64,25 @@ class HomeyLights(BaseFunction):
         command_type kan være: 'on', 'off', 'dim', 'unknown'
         """
         command = command.lower()
+        logger.info(f"Analyserer kommandotype for: {command}")
         
         # Av-kommandoer
         if any(phrase in command for phrase in ["slå av", "skru av", "slukk", "av med", "lys av", "taklys av"]):
+            logger.info("Kommandotype: OFF")
             return 'off', 0.0
 
         # På-kommandoer
         if any(phrase in command for phrase in ["slå på", "skru på", "tenn", "på med", "lys på", "taklys på"]):
+            logger.info("Kommandotype: ON")
             return 'on', 1.0
 
         # Dimming-kommandoer
-        if any(phrase in command for phrase in ["dimme", "dim", "sett", "juster", "endre", "styrke"]):
+        if any(phrase in command for phrase in ["dimme", "dim", "sett", "juster", "endre", "styrke", "prosent"]):
+            logger.info("Kommandotype: DIM")
             # Se etter prosentverdier
             for num in range(0, 101):
                 if f"{num}%" in command or f"{num} prosent" in command:
+                    logger.info(f"Fant dimming-verdi: {num}%")
                     return 'dim', num / 100
                     
             # Se etter beskrivende ord
@@ -82,9 +95,11 @@ class HomeyLights(BaseFunction):
             else:
                 return 'dim', 0.5  # standard verdi
 
+        logger.info("Kommandotype: UNKNOWN")
         return 'unknown', 0.0
 
     async def execute(self, command: str, params: Optional[Dict] = None) -> str:
+        logger.info(f"Utfører kommando: {command}")
         headers = {
             "Authorization": f"Bearer {self.token}",
             "Content-Type": "application/json"
@@ -95,6 +110,7 @@ class HomeyLights(BaseFunction):
             return f"Vil du styre lyset i {self.room}? Vennligst spesifiser."
 
         command_type, dim_value = self._get_command_type(command)
+        logger.info(f"Kommandotype: {command_type}, Dim-verdi: {dim_value}")
         
         async with httpx.AsyncClient() as client:
             try:
@@ -117,4 +133,5 @@ class HomeyLights(BaseFunction):
                     return f"Beklager, jeg forstod ikke kommandoen. Vil du slå av, slå på, eller dimme lyset i {self.room}?"
                 
             except httpx.RequestError as e:
+                logger.error(f"Feil ved styring av lys: {str(e)}")
                 return f"Kunne ikke styre taklyset i {self.room}: {str(e)}"
