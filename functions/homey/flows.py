@@ -18,9 +18,7 @@ class HomeyFlows(BaseFunction):
         self.flows_file.parent.mkdir(parents=True, exist_ok=True)
         self.last_update = None
         self.flows = self.load_flows()
-        
-        # Start bakgrunnsoppdatering når serveren starter
-        asyncio.create_task(self._start_periodic_update())
+        self.update_task = None
 
     @property
     def name(self) -> str:
@@ -28,8 +26,11 @@ class HomeyFlows(BaseFunction):
 
     @property
     def descriptions(self) -> List[str]:
-        # Dette vil bli dynamisk basert på flow-navnene
-        base_descriptions = ["flow", "flows", "automation", "automatisering"]
+        base_descriptions = [
+            "flow", "flows", "automation", "automatisering",
+            "vis flows", "list flows", "hvilke flows",
+            "kjør flow", "start flow"
+        ]
         if self.flows:
             return base_descriptions + [flow["name"].lower() for flow in self.flows]
         return base_descriptions
@@ -39,7 +40,9 @@ class HomeyFlows(BaseFunction):
         if self.flows_file.exists():
             try:
                 with open(self.flows_file, 'r', encoding='utf-8') as f:
-                    return json.load(f)
+                    data = json.load(f)
+                    logger.info(f"Lastet {len(data)} flows fra fil")
+                    return data
             except Exception as e:
                 logger.error(f"Kunne ikke laste flows: {e}")
         return []
@@ -58,6 +61,7 @@ class HomeyFlows(BaseFunction):
     async def update_flows(self):
         """Hent og oppdater flows fra Homey"""
         try:
+            logger.info("Henter flows fra Homey...")
             async with httpx.AsyncClient() as client:
                 response = await client.get(
                     self.base_url,
@@ -65,64 +69,52 @@ class HomeyFlows(BaseFunction):
                 )
                 response.raise_for_status()
                 flows = response.json()
+                logger.info(f"Hentet {len(flows)} flows fra Homey")
                 self.save_flows(flows)
                 return flows
         except Exception as e:
             logger.error(f"Kunne ikke hente flows: {e}")
             return None
 
-    async def _start_periodic_update(self):
-        """Start den periodiske oppdateringen"""
-        try:
-            logger.info("Starter første flow-oppdatering")
-            await self.update_flows()
-            
-            while True:
-                await asyncio.sleep(1800)  # 30 minutter
-                logger.info("Kjører periodisk flow-oppdatering")
-                await self.update_flows()
-                
-        except Exception as e:
-            logger.error(f"Feil i periodisk oppdatering: {e}")
-
     async def execute(self, command: str, params: Optional[Dict] = None) -> str:
         """Kjør en flow basert på kommando"""
         command = command.lower()
-        logger.info(f"Utfører flow-kommando: {command}")
+        logger.info(f"Behandler flow-kommando: {command}")
 
-        # Hvis det er en generell forespørsel om flows
+        # Første gang eller etter lang tid, oppdater flows
+        if not self.flows or not self.last_update or (datetime.now() - self.last_update).seconds > 3600:
+            logger.info("Oppdaterer flows før kommando utføres")
+            await self.update_flows()
+
+        # Vis tilgjengelige flows
         if any(word in command for word in ["vis", "list", "hvilke"]) and any(word in command for word in ["flows", "flow", "automatisering"]):
             if not self.flows:
-                return "Ingen flows funnet. Venter på første oppdatering fra Homey."
+                return "Ingen flows funnet."
             flow_names = [f["name"] for f in self.flows]
             return f"Tilgjengelige flows: {', '.join(flow_names)}"
 
-        # Finn matching flow
+        # Finn matching flow for kjøring
         matching_flows = [
             flow for flow in self.flows 
             if flow["name"].lower() in command
         ]
 
-        if not matching_flows:
-            if "flows" in command or "flow" in command:
-                flow_names = [f["name"] for f in self.flows]
-                return f"Tilgjengelige flows: {', '.join(flow_names)}"
-            return None
+        if matching_flows:
+            try:
+                async with httpx.AsyncClient() as client:
+                    for flow in matching_flows:
+                        logger.info(f"Kjører flow: {flow['name']}")
+                        await client.post(
+                            f"{self.base_url}/{flow['id']}/trigger",
+                            headers={"Authorization": f"Bearer {self.token}"}
+                        )
+                    
+                    if len(matching_flows) == 1:
+                        return f"Kjørte flow: {matching_flows[0]['name']}"
+                    return f"Kjørte {len(matching_flows)} flows: {', '.join(f['name'] for f in matching_flows)}"
 
-        # Kjør flow
-        try:
-            async with httpx.AsyncClient() as client:
-                for flow in matching_flows:
-                    logger.info(f"Kjører flow: {flow['name']}")
-                    await client.post(
-                        f"{self.base_url}/{flow['id']}/trigger",
-                        headers={"Authorization": f"Bearer {self.token}"}
-                    )
-                
-                if len(matching_flows) == 1:
-                    return f"Kjørte flow: {matching_flows[0]['name']}"
-                return f"Kjørte {len(matching_flows)} flows: {', '.join(f['name'] for f in matching_flows)}"
-
-        except Exception as e:
-            logger.error(f"Kunne ikke kjøre flow: {e}")
-            return f"Beklager, kunne ikke kjøre flow: {str(e)}"
+            except Exception as e:
+                logger.error(f"Kunne ikke kjøre flow: {e}")
+                return f"Beklager, kunne ikke kjøre flow: {str(e)}"
+        
+        return None  # Ingen matching flow funnet
