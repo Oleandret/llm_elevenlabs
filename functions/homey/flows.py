@@ -19,8 +19,8 @@ class HomeyFlows(BaseFunction):
         self.last_update = None
         self.flows = self.load_flows()
         
-        # Start bakgrunnsoppdatering
-        asyncio.create_task(self.periodic_update())
+        # Start bakgrunnsoppdatering når serveren starter
+        asyncio.create_task(self._start_periodic_update())
 
     @property
     def name(self) -> str:
@@ -71,15 +71,31 @@ class HomeyFlows(BaseFunction):
             logger.error(f"Kunne ikke hente flows: {e}")
             return None
 
-    async def periodic_update(self):
-        """Oppdater flows hver 30. minutt"""
-        while True:
+    async def _start_periodic_update(self):
+        """Start den periodiske oppdateringen"""
+        try:
+            logger.info("Starter første flow-oppdatering")
             await self.update_flows()
-            await asyncio.sleep(1800)  # 30 minutter
+            
+            while True:
+                await asyncio.sleep(1800)  # 30 minutter
+                logger.info("Kjører periodisk flow-oppdatering")
+                await self.update_flows()
+                
+        except Exception as e:
+            logger.error(f"Feil i periodisk oppdatering: {e}")
 
     async def execute(self, command: str, params: Optional[Dict] = None) -> str:
         """Kjør en flow basert på kommando"""
         command = command.lower()
+        logger.info(f"Utfører flow-kommando: {command}")
+
+        # Hvis det er en generell forespørsel om flows
+        if any(word in command for word in ["vis", "list", "hvilke"]) and any(word in command for word in ["flows", "flow", "automatisering"]):
+            if not self.flows:
+                return "Ingen flows funnet. Venter på første oppdatering fra Homey."
+            flow_names = [f["name"] for f in self.flows]
+            return f"Tilgjengelige flows: {', '.join(flow_names)}"
 
         # Finn matching flow
         matching_flows = [
@@ -97,6 +113,7 @@ class HomeyFlows(BaseFunction):
         try:
             async with httpx.AsyncClient() as client:
                 for flow in matching_flows:
+                    logger.info(f"Kjører flow: {flow['name']}")
                     await client.post(
                         f"{self.base_url}/{flow['id']}/trigger",
                         headers={"Authorization": f"Bearer {self.token}"}
