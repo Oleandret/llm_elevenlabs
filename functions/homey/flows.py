@@ -1,87 +1,55 @@
-import os
-import json
-import httpx
-import logging
-from datetime import datetime
-from pathlib import Path
-from functions.function_base import BaseFunction
-from typing import List, Optional, Dict, Union
+def _find_matching_flow(self, command: str) -> Optional[Dict]:
+        """Finn en flow basert på navn"""
+        command = command.lower().strip()
+        logger.info(f"Søker etter flow i kommando: {command}")
 
-logger = logging.getLogger(__name__)
+        # Fjern vanlige ord og fraser som kan forstyrre søket
+        ignore_words = ['kan du', 'vær så snill', 'er det mulig', 'jeg vil', 'gjerne', 
+                       'start', 'kjør', 'aktiver', 'trigger', 'flow', 'automation', 
+                       'på', 'i', 'og', 'som', 'heter']
+        
+        for word in ignore_words:
+            command = command.replace(word, ' ')
 
-class HomeyFlows(BaseFunction):
-    def __init__(self):
-        self.base_url = "https://64f5c8926da3f17a12bc9c7c.connect.athom.com/api/manager/flow/flow"
-        self.token = os.getenv("HOMEY_API_TOKEN")
-        self.flows_file = Path("data/homey/flows.json")
-        self.flows_file.parent.mkdir(parents=True, exist_ok=True)
-        self.last_update = None
-        self.flows = self.load_flows()
+        # Rensk kommandoen
+        command = ' '.join(command.split())
+        logger.info(f"Renset kommando for søk: {command}")
 
-    @property
-    def name(self) -> str:
-        return "homey_flows"
+        # Søk gjennom flows
+        best_match = None
+        highest_word_match = 0
 
-    @property
-    def descriptions(self) -> List[str]:
-        base_descriptions = [
-            "flow", "flows", "automation", "automatisering",
-            "vis flows", "list flows", "hvilke flows",
-            "kjør flow", "start flow"
-        ]
-        if self.flows:
-            try:
-                flow_names = []
-                for flow in self.flows.values() if isinstance(self.flows, dict) else self.flows:
-                    if isinstance(flow, dict) and 'name' in flow:
-                        flow_names.append(flow['name'].lower())
-                return base_descriptions + flow_names
-            except Exception as e:
-                logger.error(f"Feil ved parsing av flow-navn: {e}")
-        return base_descriptions
-
-    def load_flows(self) -> Dict:
-        """Last flows fra fil"""
-        if self.flows_file.exists():
-            try:
-                with open(self.flows_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    logger.info(f"Lastet flows data fra fil")
-                    return data
-            except Exception as e:
-                logger.error(f"Kunne ikke laste flows: {e}")
-        return {}
-
-    def save_flows(self, flows_data: Dict):
-        """Lagre flows til fil"""
         try:
-            with open(self.flows_file, 'w', encoding='utf-8') as f:
-                json.dump(flows_data, f, indent=2, ensure_ascii=False)
-            self.flows = flows_data
-            self.last_update = datetime.now()
-            logger.info(f"Lagret flows til {self.flows_file}")
-        except Exception as e:
-            logger.error(f"Kunne ikke lagre flows: {e}")
-
-    async def update_flows(self):
-        """Hent og oppdater flows fra Homey"""
-        try:
-            logger.info("Henter flows fra Homey...")
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    self.base_url,
-                    headers={"Authorization": f"Bearer {self.token}"}
-                )
-                response.raise_for_status()
+            for flow_id, flow in self.flows.items():
+                if not isinstance(flow, dict) or 'name' not in flow:
+                    continue
                 
-                flows_data = response.json()
-                logger.info(f"Hentet flows data fra Homey")
-                self.save_flows(flows_data)
-                return flows_data
+                flow_name = flow['name'].lower()
+                logger.info(f"Sammenligner med flow: {flow_name}")
+                
+                # Del opp i ord og se etter matches
+                flow_words = set(flow_name.split())
+                command_words = set(command.split())
+                matching_words = flow_words.intersection(command_words)
+                
+                if len(matching_words) > highest_word_match:
+                    highest_word_match = len(matching_words)
+                    best_match = flow
+                    logger.info(f"Ny beste match funnet: {flow_name} med {len(matching_words)} matchende ord")
+                
+                # Eksakt match
+                if flow_name in command:
+                    logger.info(f"Eksakt match funnet: {flow_name}")
+                    return flow
 
+            if highest_word_match > 0:
+                logger.info(f"Beste partial match: {best_match['name']}")
+                return best_match
+                
         except Exception as e:
-            logger.error(f"Kunne ikke hente flows: {e}")
-            return None
+            logger.error(f"Feil under flow-søk: {e}")
+        
+        return None
 
     async def execute(self, command: str, params: Optional[Dict] = None) -> str:
         """Kjør en flow basert på kommando"""
@@ -112,32 +80,20 @@ class HomeyFlows(BaseFunction):
                 logger.error(f"Feil ved listing av flows: {e}")
                 return "Beklager, kunne ikke liste flows på grunn av en feil."
 
-        # Finn matching flow for kjøring
-        matching_flows = []
-        try:
-            for flow_id, flow in self.flows.items():
-                if isinstance(flow, dict) and 'name' in flow and flow['name'].lower() in command:
-                    matching_flows.append(flow)
-        except Exception as e:
-            logger.error(f"Feil ved matching av flows: {e}")
-            return "Beklager, kunne ikke søke etter flows på grunn av en feil."
-
-        if matching_flows:
+        # Finn og kjør flow
+        matching_flow = self._find_matching_flow(command)
+        if matching_flow:
             try:
+                logger.info(f"Kjører flow: {matching_flow['name']}")
                 async with httpx.AsyncClient() as client:
-                    for flow in matching_flows:
-                        logger.info(f"Kjører flow: {flow['name']}")
-                        await client.post(
-                            f"{self.base_url}/{flow['id']}/trigger",
-                            headers={"Authorization": f"Bearer {self.token}"}
-                        )
-                    
-                    if len(matching_flows) == 1:
-                        return f"Kjørte flow: {matching_flows[0]['name']}"
-                    return f"Kjørte {len(matching_flows)} flows: {', '.join(f['name'] for f in matching_flows)}"
+                    await client.post(
+                        f"{self.base_url}/{matching_flow['id']}/trigger",
+                        headers={"Authorization": f"Bearer {self.token}"}
+                    )
+                return f"Kjørte flow: {matching_flow['name']}"
 
             except Exception as e:
                 logger.error(f"Kunne ikke kjøre flow: {e}")
                 return f"Beklager, kunne ikke kjøre flow: {str(e)}"
         
-        return None  # Ingen matching flow funnet
+        return None
