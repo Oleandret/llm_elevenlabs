@@ -79,7 +79,7 @@ async def identify_command_type(message: str) -> bool:
     """
     command_indicators = [
         # Lys-relaterte ord
-        "lys", "taklys", "lampe", "lamper", "belysning",
+        "lys", "taklys", "lampe", "lamper", "belysning", "stuelys",
         
         # Handlinger
         "slå på", "slå av", "skru på", "skru av",
@@ -96,14 +96,25 @@ async def identify_command_type(message: str) -> bool:
     ]
     
     message = message.lower()
+    logger.info(f"Sjekker melding for kommandoindikatorer: {message}")
     
     # Sjekk for prosent-verdier (f.eks. "30 prosent", "30%")
-    if any(str(num) + "%" in message.replace(" ", "") for num in range(101)):
-        return True
-    if any(str(num) + " prosent" in message for num in range(101)):
-        return True
-        
-    return any(indicator in message for indicator in command_indicators)
+    for num in range(101):
+        if str(num) + "%" in message.replace(" ", ""):
+            logger.info(f"Fant prosentverdi: {num}%")
+            return True
+        if str(num) + " prosent" in message:
+            logger.info(f"Fant prosentverdi: {num} prosent")
+            return True
+    
+    # Sjekk for kommandoindikatorer
+    for indicator in command_indicators:
+        if indicator in message:
+            logger.info(f"Fant kommandonindikator: {indicator}")
+            return True
+            
+    logger.info("Ingen kommandoindikatorer funnet")
+    return False
 
 async def stream_function_response(response: str):
     try:
@@ -136,6 +147,7 @@ async def create_chat_completion(request: ChatCompletionRequest):
         if is_command:
             logger.info(f"Prøver å utføre kommando: {last_message}")
             function_response = await function_registry.handle_command(last_message)
+            logger.info(f"Function response: {function_response}")
             
             if function_response:
                 logger.info(f"Kommando utført, returnerer: {function_response}")
@@ -150,6 +162,8 @@ async def create_chat_completion(request: ChatCompletionRequest):
                             "message": {"role": "assistant", "content": function_response}
                         }]
                     }
+            else:
+                logger.info("Ingen funksjon matchet kommandoen")
         
         # Hvis ikke en kommando eller ingen funksjon matchet, send til GPT
         logger.info("Sender til GPT")
