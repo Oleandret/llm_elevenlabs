@@ -77,16 +77,32 @@ async def identify_command_type(message: str) -> bool:
     """
     Identifiserer om en melding sannsynligvis er en kommando for smarthjem
     """
-    # Nøkkelord som indikerer smarthjem-kommandoer
     command_indicators = [
-        "lys", "taklys", "lampe", "lamper", 
+        # Lys-relaterte ord
+        "lys", "taklys", "lampe", "lamper", "belysning",
+        
+        # Handlinger
         "slå på", "slå av", "skru på", "skru av",
-        "dimme", "dim", "justere", "endre",
-        "stue", "stuen", "rom",
-        "prosent", "%"
+        "dimme", "dim", "dimming", "justere", "endre", "sett",
+        
+        # Rom
+        "stue", "stuen",
+        
+        # Målinger
+        "prosent", "%",
+        
+        # Korte kommandoer
+        "av", "på", "ned", "opp"
     ]
     
     message = message.lower()
+    
+    # Sjekk for prosent-verdier (f.eks. "30 prosent", "30%")
+    if any(str(num) + "%" in message.replace(" ", "") for num in range(101)):
+        return True
+    if any(str(num) + " prosent" in message for num in range(101)):
+        return True
+        
     return any(indicator in message for indicator in command_indicators)
 
 async def stream_function_response(response: str):
@@ -111,16 +127,18 @@ async def stream_gpt_response(completion):
 async def create_chat_completion(request: ChatCompletionRequest):
     try:
         last_message = request.messages[-1].content
+        logger.info(f"Mottok melding: {last_message}")
         
         # Sjekk først om dette ser ut som en kommando
         is_command = await identify_command_type(last_message)
+        logger.info(f"Er dette en kommando? {is_command}")
         
         if is_command:
-            logger.info(f"Melding identifisert som mulig kommando: {last_message}")
+            logger.info(f"Prøver å utføre kommando: {last_message}")
             function_response = await function_registry.handle_command(last_message)
             
             if function_response:
-                logger.info(f"Funksjon utført, returnerer: {function_response}")
+                logger.info(f"Kommando utført, returnerer: {function_response}")
                 if request.stream:
                     return StreamingResponse(
                         stream_function_response(function_response),
