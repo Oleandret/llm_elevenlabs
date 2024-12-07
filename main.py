@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List, Optional
-from openai import AsyncOpenAI
+from openai import AsyncClient
 from dotenv import load_dotenv
 import uvicorn
 from pathlib import Path
@@ -32,9 +32,10 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Initialiser OpenAI klient
-client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-if not client.api_key:
+api_key = os.getenv("OPENAI_API_KEY")
+if not api_key:
     raise ValueError("OPENAI_API_KEY mangler i miljøvariabler.")
+client = AsyncClient(api_key=api_key)
 
 # Initialiser FastAPI-appen
 app = FastAPI()
@@ -149,7 +150,7 @@ async def stream_function_response(response: str):
 async def stream_gpt_response(completion):
     try:
         async for chunk in completion:
-            chunk_dict = chunk.model_dump()
+            chunk_dict = chunk.to_dict()
             yield f"data: {json.dumps(chunk_dict)}\n\n"
         yield "data: [DONE]\n\n"
     except Exception as e:
@@ -193,11 +194,12 @@ async def get_chat_completion(messages: List[dict], user_message: str) -> str:
     except Exception as e:
         logger.error(f"OpenAI API error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
+    except Exception as e:
+        logger.error(f"OpenAI API error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 @app.post("/chat")
-async def chat(message: str):
-    messages = []
-    response = await get_chat_completion(messages, message)
+async def chat(request: ChatCompletionRequest):
+    response = await get_chat_completion(request.messages, request.messages[-1].content)
     
     # Håndter smarthus-kommandoer
     if response.startswith("EXECUTE_FLOW:"):
@@ -247,8 +249,15 @@ async def create_chat_completion(request: ChatCompletionRequest):
             request_data["user"] = request_data.pop("user_id")
 
         request_data = await adjust_max_tokens(request_data)
-        completion = await client.chat.completions.create(**request_data)
-        
+        completion = await client.chat.completions.create(
+            model=request_data['model'],
+            messages=request_data['messages'],
+            temperature=request_data.get('temperature', 0.7),
+            max_tokens=request_data.get('max_tokens'),
+            stream=request_data.get('stream', False),
+            user=request_data.get('user')
+        )
+        return completion.to_dict()
         if request_data.get("stream", False):
             return StreamingResponse(
                 stream_gpt_response(completion),
@@ -291,40 +300,57 @@ async def reload_functions():
         "functions_loaded": len(function_registry.get_all_functions())
     }
 
-def load_functions():
-    """Load functions from /functions directory"""
+def load_functions() -> None:
+    """Load all functions from /functions directory"""
     functions_path = Path(__file__).parent / "functions"
     
     for item in functions_path.rglob("*.py"):
         if item.stem.startswith("__"):
             continue
             
-        module_path = item.relative_to(functions_path.parent)
-        module_name = str(module_path.with_suffix("")).replace("/", ".")
-        
         try:
+            # Convert path to module notation
+            module_path = item.relative_to(functions_path.parent)
+            module_name = str(module_path.with_suffix("")).replace("/", ".")
+            
+            # Import module
             module = importlib.import_module(module_name)
             
+            # Find and register function classes
             for name, obj in inspect.getmembers(module):
                 if (inspect.isclass(obj) 
                     and issubclass(obj, BaseFunction)
                     and obj != BaseFunction):
                     logger.info(f"Loading function: {name} from {module_name}")
-                    instance = obj()
-                    function_registry.register_function(instance)
-                    
+                    try:
+                        instance = obj()
+                        if not hasattr(instance, 'name'):
+                            logger.error(f"Function {name} missing name property")
+                            continue
+                        function_registry.register_function(instance)
+                    except Exception as e:
+                        logger.error(f"Error instantiating {name}: {e}")
+                        
         except Exception as e:
             logger.error(f"Error loading module {module_name}: {e}")
 
-# Initialiser
-function_registry = FunctionRegistry()
-load_functions()
-
+# Ensure proper initialization order
+port = int(os.getenv("PORT", 8000))
+limit_max_requests = 100 if os.getenv("ENV", "development") == "development" else None
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 8000))
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
         port=port,
-        reload=False
+        reload=True,
+        access_log=True,
+        workers=1,
+        timeout_notify=30,
+        limit_concurrency=1,
+        limit_max_requests=limit_max_requests,  # Ensure this is set for local development
+        root_path="",  # Set root_path to "" for local development
+        backlog=2048,  # Set backlog to 2048 for local development
+        forwarded_allow_ips="*",  # Set forwarded_allow_ips to "*" for local development
+        root_path_in_servers=True,  # Set root_path_in_servers to True for local development
+        proxy_headers=True  # Set proxy_headers to True for local development
     )
