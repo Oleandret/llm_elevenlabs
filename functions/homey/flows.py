@@ -5,7 +5,8 @@ import logging
 from datetime import datetime
 from pathlib import Path
 from functions.function_base import BaseFunction
-from typing import List, Optional, Dict, Union
+from typing import List, Optional, Dict, Union, Tuple
+from difflib import SequenceMatcher
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +18,11 @@ class HomeyFlows(BaseFunction):
         self.flows_file.parent.mkdir(parents=True, exist_ok=True)
         self.last_update = None
         self.flows = self.load_flows()
+        self.command_patterns = [
+            "start flow", "kjør flow", "aktiver flow",
+            "start scene", "kjør scene", "start automation",
+            "slå på", "skru på", "trigger"
+        ]
 
     @property
     def name(self) -> str:
@@ -170,35 +176,61 @@ class HomeyFlows(BaseFunction):
         query = query.lower()
         return any(keyword in query for keyword in smart_home_keywords)
 
+    def similar(self, a: str, b: str) -> float:
+        """Returnerer likhetsscore mellom to strenger"""
+        return SequenceMatcher(None, a.lower(), b.lower()).ratio()
+
+    def find_matching_flow(self, command: str) -> List[Dict]:
+        """Finn flows som matcher kommandoen med fuzzy matching"""
+        command = command.lower()
+        matching_flows = []
+        threshold = 0.7  # Justerbar terskel for matching
+
+        # Logger tilgjengelige flows for debugging
+        logger.debug(f"Tilgjengelige flows: {[f['name'] for f in self.flows]}")
+        logger.debug(f"Søker etter match for kommando: {command}")
+
+        for flow in self.flows:
+            flow_name = flow['name'].lower()
+            
+            # Direkte match
+            if flow_name in command:
+                matching_flows.append((flow, 1.0))
+                continue
+            
+            # Fuzzy match på hele flow-navnet
+            similarity = self.similar(flow_name, command)
+            if similarity > threshold:
+                matching_flows.append((flow, similarity))
+                
+            # Match på ord-for-ord basis
+            words = flow_name.split()
+            if all(any(self.similar(word, cmd_part) > threshold 
+                      for cmd_part in command.split())
+                  for word in words):
+                matching_flows.append((flow, 0.8))
+
+        # Sorter etter likhetsscore og returner flows
+        return [f[0] for f in sorted(matching_flows, key=lambda x: x[1], reverse=True)]
+
     async def handle_command(self, command: str) -> Optional[str]:
         """Forbedret kommandohåndtering"""
-        if not self.is_smart_home_request(command):
+        if not any(pattern in command.lower() for pattern in self.command_patterns):
             return None
+
+        matching_flows = self.find_matching_flow(command)
+        
+        if not matching_flows:
+            available_flows = "\n".join([f"- {f['name']}" for f in self.flows])
+            logger.info(f"Ingen matching flows funnet. Tilgjengelige flows:\n{available_flows}")
+            return f"Fant ingen matching flows. Tilgjengelige flows:\n{available_flows}"
+
+        try:
+            for flow in matching_flows:
+                logger.info(f"Kjører flow: {flow['name']}")
+                await self.trigger_flow(flow['id'])
             
-        # Ekstraher flow-navn fra kommando
-        command = command.lower()
-        flows = self.load_flows()
-        
-        # Fuzzy matching av flow-navn
-        matching_flows = []
-        for flow in flows:
-            flow_name = flow['name'].lower()
-            # Sjekk om flow-navnet er nevnt i kommandoen
-            if flow_name in command:
-                matching_flows.append(flow)
-            # Sjekk om alle ord i flow-navnet finnes i kommandoen
-            elif all(word in command for word in flow_name.split()):
-                matching_flows.append(flow)
-        
-        if matching_flows:
-            try:
-                for flow in matching_flows:
-                    logger.info(f"Kjører flow: {flow['name']}")
-                    await self.trigger_flow(flow['id'])
-                
-                return f"Kjørte {'flow' if len(matching_flows) == 1 else 'flows'}: {', '.join(f['name'] for f in matching_flows)}"
-            except Exception as e:
-                logger.error(f"Feil ved kjøring av flow: {e}")
-                return f"Beklager, kunne ikke kjøre flow: {str(e)}"
-                
-        return "Fant ingen matchende flows"
+            return f"Kjørte flow: {', '.join(f['name'] for f in matching_flows)}"
+        except Exception as e:
+            logger.error(f"Feil ved kjøring av flow: {e}")
+            return f"Beklager, kunne ikke kjøre flow: {str(e)}"
