@@ -9,8 +9,12 @@ from typing import List, Optional
 from openai import AsyncOpenAI
 from dotenv import load_dotenv
 import uvicorn
+from pathlib import Path
 
 from utils.function_registry import FunctionRegistry
+from utils.homey_flows import HomeyFlows  # Add this import statement
+
+DEFAULT_SYSTEM_PROMPT = "This is the default system prompt."
 
 # Last miljøvariabler fra .env
 load_dotenv()
@@ -41,6 +45,14 @@ app.add_middleware(
 
 # Initialiser function registry
 function_registry = FunctionRegistry()
+
+def load_system_prompt() -> str:
+    """Les system prompt fra fil"""
+    prompt_path = Path("SYSTEM_PROMPT.md")
+    if not prompt_path.exists():
+        logger.error("SYSTEM_PROMPT.md ikke funnet")
+        return DEFAULT_SYSTEM_PROMPT
+    return prompt_path.read_text()
 
 class Message(BaseModel):
     role: str
@@ -155,21 +167,16 @@ async def analyze_intent(message: str) -> dict:
     }
 
 async def get_chat_completion(messages: List[dict], user_message: str) -> str:
-    intent = await analyze_intent(user_message)
+    system_prompt = load_system_prompt()
     
-    if intent["type"] == "smart_home":
-        # Legg til smarthus-kontekst i system prompt
-        system_prompt = """Du er en assistent som kan hjelpe med både smarthus-styring 
-        og generelle spørsmål. For smarthus-kommandoer, start svaret med EXECUTE_FLOW: 
-        hvis du er sikker på hvilken flow som skal kjøres. Hvis du er usikker, spør om 
-        mer informasjon."""
-        
-        messages[0]["content"] = system_prompt
+    # Oppdater eller legg til system message
+    if not messages:
+        messages = [{"role": "system", "content": system_prompt}]
     else:
-        # Standard system prompt for generelle spørsmål
-        messages[0]["content"] = """Du er en hjelpsom assistent som svarer på 
-        generelle spørsmål. Svar konsist og relevant."""
-
+        messages[0] = {"role": "system", "content": system_prompt}
+    
+    messages.append({"role": "user", "content": user_message})
+    
     try:
         response = await client.chat.completions.create(
             model="gpt-4",
@@ -184,6 +191,7 @@ async def get_chat_completion(messages: List[dict], user_message: str) -> str:
 
 @app.post("/chat")
 async def chat(message: str):
+    messages = []
     response = await get_chat_completion(messages, message)
     
     # Håndter smarthus-kommandoer
