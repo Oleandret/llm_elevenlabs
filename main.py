@@ -295,23 +295,20 @@ def load_functions():
     """Dynamically load all function classes from /functions directory"""
     functions_path = Path(__file__).parent / "functions"
     
-    for (_, module_name, _) in pkgutil.walk_packages([str(functions_path)]):
-        # Convert path to module notation
-        full_module_name = f"functions.{module_name}"
-        
+    for (finder, name, _) in pkgutil.walk_packages([str(functions_path)]):
         try:
-            module = importlib.import_module(full_module_name)
+            module = finder.find_module(name).load_module(name)
             
-            # Find all classes that inherit from BaseFunction
-            for name, obj in inspect.getmembers(module):
-                if (inspect.isclass(obj) 
-                    and issubclass(obj, BaseFunction) 
-                    and obj != BaseFunction):
-                    logger.info(f"Loading function: {name} from {full_module_name}")
-                    function_registry.register_function(obj())
+            for item_name, item in inspect.getmembers(module):
+                if (inspect.isclass(item) 
+                    and issubclass(item, BaseFunction) 
+                    and item != BaseFunction):
+                    logger.info(f"Loading function: {item_name} from {name}")
+                    function_instance = item()
+                    function_registry.register_function(function_instance)
                     
         except Exception as e:
-            logger.error(f"Error loading module {full_module_name}: {e}")
+            logger.error(f"Error loading module {name}: {e}")
 
 # Initialize function registry and load functions
 function_registry = FunctionRegistry()
