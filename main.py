@@ -292,25 +292,40 @@ async def reload_functions():
     }
 
 def load_functions():
-    """Dynamically load all function classes from /functions directory"""
+    """Last alle funksjoner fra /functions directory med sub-mapper"""
     functions_path = Path(__file__).parent / "functions"
     
-    for (finder, name, _) in pkgutil.walk_packages([str(functions_path)]):
-        try:
-            module = finder.find_module(name).load_module(name)
-            
-            for item_name, item in inspect.getmembers(module):
-                if (inspect.isclass(item) 
-                    and issubclass(item, BaseFunction) 
-                    and item != BaseFunction):
-                    logger.info(f"Loading function: {item_name} from {name}")
-                    function_instance = item()
-                    function_registry.register_function(function_instance)
+    def walk_modules(path: Path, package: str = ""):
+        for item in path.iterdir():
+            if item.is_dir() and not item.name.startswith("__"):
+                # Opprett tom __init__.py hvis den ikke finnes
+                init_file = item / "__init__.py"
+                if not init_file.exists():
+                    init_file.touch()
                     
-        except Exception as e:
-            logger.error(f"Error loading module {name}: {e}")
+                # Rekursivt gå gjennom sub-mapper
+                subpackage = f"{package}.{item.name}" if package else item.name
+                walk_modules(item, subpackage)
+                
+            elif item.suffix == ".py" and not item.name.startswith("__"):
+                module_name = item.stem
+                full_module_name = f"functions.{package}.{module_name}" if package else f"functions.{module_name}"
+                
+                try:
+                    module = importlib.import_module(full_module_name)
+                    for name, obj in inspect.getmembers(module):
+                        if (inspect.isclass(obj) 
+                            and issubclass(obj, BaseFunction) 
+                            and obj != BaseFunction):
+                            logger.info(f"Loading function: {name} from {full_module_name}")
+                            function_registry.register_function(obj())
+                            
+                except Exception as e:
+                    logger.error(f"Error loading module {full_module_name}: {e}")
+    
+    walk_modules(functions_path)
 
-# Initialize function registry and load functions
+# Initialiser
 function_registry = FunctionRegistry()
 load_functions()
 
