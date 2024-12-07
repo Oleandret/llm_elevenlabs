@@ -12,7 +12,7 @@ import uvicorn
 from pathlib import Path
 
 from utils.function_registry import FunctionRegistry
-from utils.homey_flows import HomeyFlows  # Add this import statement
+from functions.homey.flows import HomeyFlows  # Correct import for existing structure
 
 DEFAULT_SYSTEM_PROMPT = "This is the default system prompt."
 
