@@ -14,6 +14,11 @@ from pathlib import Path
 from utils.function_registry import FunctionRegistry
 from functions.homey.flows import HomeyFlows  # Correct import for existing structure
 
+import importlib
+import pkgutil
+import inspect
+from functions.function_base import BaseFunction
+
 DEFAULT_SYSTEM_PROMPT = "This is the default system prompt."
 
 # Last miljøvariabler fra .env
@@ -285,6 +290,32 @@ async def reload_functions():
         "status": "success",
         "functions_loaded": len(function_registry.get_all_functions())
     }
+
+def load_functions():
+    """Dynamically load all function classes from /functions directory"""
+    functions_path = Path(__file__).parent / "functions"
+    
+    for (_, module_name, _) in pkgutil.walk_packages([str(functions_path)]):
+        # Convert path to module notation
+        full_module_name = f"functions.{module_name}"
+        
+        try:
+            module = importlib.import_module(full_module_name)
+            
+            # Find all classes that inherit from BaseFunction
+            for name, obj in inspect.getmembers(module):
+                if (inspect.isclass(obj) 
+                    and issubclass(obj, BaseFunction) 
+                    and obj != BaseFunction):
+                    logger.info(f"Loading function: {name} from {full_module_name}")
+                    function_registry.register_function(obj())
+                    
+        except Exception as e:
+            logger.error(f"Error loading module {full_module_name}: {e}")
+
+# Initialize function registry and load functions
+function_registry = FunctionRegistry()
+load_functions()
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
