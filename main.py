@@ -194,9 +194,6 @@ async def get_chat_completion(messages: List[dict], user_message: str) -> str:
     except Exception as e:
         logger.error(f"OpenAI API error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-    except Exception as e:
-        logger.error(f"OpenAI API error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 @app.post("/chat")
 async def chat(request: ChatCompletionRequest):
     response = await get_chat_completion(request.messages, request.messages[-1].content)
@@ -332,11 +329,12 @@ def load_functions() -> None:
                         logger.error(f"Error instantiating {name}: {e}")
                         
         except Exception as e:
-            logger.error(f"Error loading module {module_name}: {e}")
+            logger.error(f"Error instantiating {name}: {e}")
 
-# Ensure proper initialization order
 port = int(os.getenv("PORT", 8000))
 limit_max_requests = 100 if os.getenv("ENV", "development") == "development" else None
+backlog = 2048 if os.getenv("ENV", "development") == "development" else None
+
 if __name__ == "__main__":
     uvicorn.run(
         "main:app",
@@ -347,10 +345,10 @@ if __name__ == "__main__":
         workers=1,
         timeout_notify=30,
         limit_concurrency=1,
-        limit_max_requests=limit_max_requests,  # Ensure this is set for local development
-        root_path="",  # Set root_path to "" for local development
-        backlog=2048,  # Set backlog to 2048 for local development
-        forwarded_allow_ips="*",  # Set forwarded_allow_ips to "*" for local development
-        root_path_in_servers=True,  # Set root_path_in_servers to True for local development
-        proxy_headers=True  # Set proxy_headers to True for local development
+        limit_max_requests=limit_max_requests,
+        root_path="",
+        backlog=backlog,
+        forwarded_allow_ips="*" if os.getenv("ENV", "development") == "development" else None,
+        proxy_headers=os.getenv("ENV", "development") == "development"
     )
+        proxy_headers=True  # Set proxy_headers to True for local development
