@@ -25,20 +25,36 @@ class HomeyFlows(BaseFunction):
     @property
     def descriptions(self) -> List[str]:
         base_descriptions = [
-            "flow", "flows", "automation", "automatisering",
-            "vis flows", "list flows", "hvilke flows",
-            "kjør flow", "start flow"
+            "Styr smarthuset",
+            "Kontroller huset",
+            "Skru på/av lys",
+            "Endre belysning",
+            "Juster temperatur",
+            "Sjekk status på enheter",
+            "Åpne/lukke dører",
+            "Styr varme",
+            "Kontroller vinduer",
+            "Sett på musikk",
+            "Smart hjem kontroll"
         ]
-        if self.flows:
-            try:
-                flow_names = []
-                for flow in self.flows.values() if isinstance(self.flows, dict) else self.flows:
-                    if isinstance(flow, dict) and 'name' in flow:
-                        flow_names.append(flow['name'].lower())
-                return base_descriptions + flow_names
-            except Exception as e:
-                logger.error(f"Feil ved parsing av flow-navn: {e}")
-        return base_descriptions
+        
+        # Legg til vanlige norske fraser
+        action_phrases = [
+            "Kan du {action}",
+            "Jeg vil gjerne {action}",
+            "Vær så snill å {action}",
+            "Kunne du {action}",
+            "Er det mulig å {action}",
+            "Hjelp meg å {action}"
+        ]
+        
+        expanded_descriptions = []
+        for desc in base_descriptions:
+            expanded_descriptions.append(desc)
+            for phrase in action_phrases:
+                expanded_descriptions.append(phrase.format(action=desc.lower()))
+        
+        return expanded_descriptions
 
     def load_flows(self) -> Dict:
         """Last flows fra fil"""
@@ -141,3 +157,13 @@ class HomeyFlows(BaseFunction):
                 return f"Beklager, kunne ikke kjøre flow: {str(e)}"
         
         return None  # Ingen matching flow funnet
+
+    def is_smart_home_request(self, query: str) -> bool:
+        """Sjekker om forespørselen er relatert til smarthus-styring"""
+        smart_home_keywords = [
+            "hus", "smart", "lys", "varme", "temperatur", "dør", 
+            "vindu", "musikk", "skru", "slå", "styr", "kontroller"
+        ]
+        
+        query = query.lower()
+        return any(keyword in query for keyword in smart_home_keywords)
