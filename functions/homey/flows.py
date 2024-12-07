@@ -159,11 +159,46 @@ class HomeyFlows(BaseFunction):
         return None  # Ingen matching flow funnet
 
     def is_smart_home_request(self, query: str) -> bool:
-        """Sjekker om forespørselen er relatert til smarthus-styring"""
+        """Forbedret gjenkjenning av smarthus-kommandoer"""
         smart_home_keywords = [
             "hus", "smart", "lys", "varme", "temperatur", "dør", 
-            "vindu", "musikk", "skru", "slå", "styr", "kontroller"
+            "vindu", "musikk", "skru", "slå", "styr", "kontroller",
+            "flow", "flows", "homey", "start", "kjør", "apple tv",
+            "tv", "stue", "etasje", "rom"
         ]
         
         query = query.lower()
         return any(keyword in query for keyword in smart_home_keywords)
+
+    async def handle_command(self, command: str) -> Optional[str]:
+        """Forbedret kommandohåndtering"""
+        if not self.is_smart_home_request(command):
+            return None
+            
+        # Ekstraher flow-navn fra kommando
+        command = command.lower()
+        flows = self.load_flows()
+        
+        # Fuzzy matching av flow-navn
+        matching_flows = []
+        for flow in flows:
+            flow_name = flow['name'].lower()
+            # Sjekk om flow-navnet er nevnt i kommandoen
+            if flow_name in command:
+                matching_flows.append(flow)
+            # Sjekk om alle ord i flow-navnet finnes i kommandoen
+            elif all(word in command for word in flow_name.split()):
+                matching_flows.append(flow)
+        
+        if matching_flows:
+            try:
+                for flow in matching_flows:
+                    logger.info(f"Kjører flow: {flow['name']}")
+                    await self.trigger_flow(flow['id'])
+                
+                return f"Kjørte {'flow' if len(matching_flows) == 1 else 'flows'}: {', '.join(f['name'] for f in matching_flows)}"
+            except Exception as e:
+                logger.error(f"Feil ved kjøring av flow: {e}")
+                return f"Beklager, kunne ikke kjøre flow: {str(e)}"
+                
+        return "Fant ingen matchende flows"
