@@ -139,6 +139,63 @@ async def stream_gpt_response(completion):
         logger.error(f"Streaming error: {str(e)}")
         yield f'data: {json.dumps({"error": str(e)})}\n\n'
 
+async def analyze_intent(message: str) -> dict:
+    """Analyser brukerens intensjon med meldingen"""
+    smart_home_keywords = [
+        "homey", "flow", "lys", "varme", "smarthus", 
+        "skru på", "skru av", "styr", "scene"
+    ]
+    
+    # Sjekk for direkte smarthus-kommandoer
+    is_smart_home = any(keyword in message.lower() for keyword in smart_home_keywords)
+    
+    return {
+        "type": "smart_home" if is_smart_home else "general",
+        "confidence": 0.8 if is_smart_home else 0.5
+    }
+
+async def get_chat_completion(messages: List[dict], user_message: str) -> str:
+    intent = await analyze_intent(user_message)
+    
+    if intent["type"] == "smart_home":
+        # Legg til smarthus-kontekst i system prompt
+        system_prompt = """Du er en assistent som kan hjelpe med både smarthus-styring 
+        og generelle spørsmål. For smarthus-kommandoer, start svaret med EXECUTE_FLOW: 
+        hvis du er sikker på hvilken flow som skal kjøres. Hvis du er usikker, spør om 
+        mer informasjon."""
+        
+        messages[0]["content"] = system_prompt
+    else:
+        # Standard system prompt for generelle spørsmål
+        messages[0]["content"] = """Du er en hjelpsom assistent som svarer på 
+        generelle spørsmål. Svar konsist og relevant."""
+
+    try:
+        response = await client.chat.completions.create(
+            model="gpt-4",
+            messages=messages,
+            temperature=0.7,
+            max_tokens=150
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        logger.error(f"OpenAI API error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/chat")
+async def chat(message: str):
+    response = await get_chat_completion(messages, message)
+    
+    # Håndter smarthus-kommandoer
+    if response.startswith("EXECUTE_FLOW:"):
+        flow_name = response.split(":", 1)[1].strip()
+        flows = HomeyFlows()
+        result = await flows.handle_command(f"start flow {flow_name}")
+        return {"response": result or response}
+    
+    # Returner vanlig GPT-svar for alle andre forespørsler
+    return {"response": response}
+
 @app.post("/v1/chat/completions")
 async def create_chat_completion(request: ChatCompletionRequest):
     try:
