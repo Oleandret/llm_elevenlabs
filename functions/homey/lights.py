@@ -9,7 +9,12 @@ logger = logging.getLogger(__name__)
 
 class HomeyLights(BaseFunction):
     def __init__(self):
-        self.base_url = "https://64f5c8926da3f17a12bc9c7c.connect.athom.com/api/manager/devices/device"
+        self.rooms = {
+            "stue": "living_room",
+            "kjøkken": "kitchen",
+            "soverom": "bedroom"
+        }
+        self.base_url = "https://[homey-id].connect.athom.com/api"
         self.token = os.getenv("HOMEY_API_TOKEN")
         self.device_id = "77535dea-499b-4a63-9e4b-3e3184763ece"
         self.room = "stuen i hovedetasjen"
@@ -114,6 +119,35 @@ class HomeyLights(BaseFunction):
 
         logger.info("Kommandotype: UNKNOWN")
         return 'unknown', 0.0
+
+    def detect_room(self, command: str) -> Optional[str]:
+        """Detect room from command"""
+        for room_no, room_en in self.rooms.items():
+            if room_no in command.lower():
+                return room_en
+        return None
+
+    async def handle_command(self, command: str) -> str:
+        room = self.detect_room(command)
+        if not room:
+            return "Hvilket rom vil du styre lyset i? (stue/kjøkken/soverom)"
+
+        try:
+            if "på" in command or "skru på" in command:
+                await self.set_light(room, True)
+                return f"Skrudde på lyset i {room}"
+            elif "av" in command or "skru av" in command:
+                await self.set_light(room, False) 
+                return f"Skrudde av lyset i {room}"
+            elif any(x in command for x in ["dim", "prosent", "styrke"]):
+                level = self.extract_level(command)
+                await self.dim_light(room, level)
+                return f"Satte lyset i {room} til {level}%"
+        except Exception as e:
+            logger.error(f"Feil ved styring av lys: {e}")
+            return f"Beklager, kunne ikke styre lyset: {e}"
+
+        return f"Usikker på hva du vil gjøre med lyset i {room}"
 
     async def execute(self, command: str, params: Optional[Dict] = None) -> str:
         logger.info(f"Utfører kommando: {command}")
