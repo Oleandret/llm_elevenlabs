@@ -173,41 +173,40 @@ async def analyze_intent(message: str) -> dict:
     }
 
 async def get_chat_completion(messages: List[dict], user_message: str) -> str:
-    system_prompt = load_system_prompt()
-    
-    # Oppdater eller legg til system message
-    if not messages:
-        messages = [{"role": "system", "content": system_prompt}]
-    else:
-        messages[0] = {"role": "system", "content": system_prompt}
-    
-    messages.append({"role": "user", "content": user_message})
-    
     try:
+        messages.append({"role": "user", "content": user_message})
+        
         response = await client.chat.completions.create(
             model="gpt-4",
             messages=messages,
             temperature=0.7,
-            max_tokens=150
+            max_tokens=150,
+            stream=False  # Set stream to False to get direct response
         )
+        
+        # Extract content from non-streaming response
         return response.choices[0].message.content
+        
     except Exception as e:
-        logger.error(f"OpenAI API error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error i chat completion: {str(e)}")
+        return "Beklager, jeg kunne ikke prosessere forespørselen din."
 
 @app.post("/chat")
-async def chat(request: ChatCompletionRequest):
-    response = await get_chat_completion(request.messages, request.messages[-1].content)
-    
-    # Håndter smarthus-kommandoer
-    if response.startswith("EXECUTE_FLOW:"):
-        flow_name = response.split(":", 1)[1].strip()
-        flows = HomeyFlows()
-        result = await flows.handle_command(f"start flow {flow_name}")
-        return {"response": result or response}
-    
-    # Returner vanlig GPT-svar for alle andre forespørsler
-    return {"response": response}
+async def chat(message: str):
+    try:
+        # First check for smart home context
+        if detect_smart_home_intent(message):
+            response = await handle_smart_home(message)
+            if response:
+                return {"response": response}
+        
+        # Fall back to GPT if no smart home handling
+        response = await get_chat_completion(messages, message)
+        return {"response": response}
+        
+    except Exception as e:
+        logger.error(f"Chat error: {str(e)}")
+        return {"response": "Beklager, det oppstod en feil."}
 
 @app.post("/v1/chat/completions")
 async def create_chat_completion(request: ChatCompletionRequest):
