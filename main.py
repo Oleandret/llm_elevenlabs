@@ -358,7 +358,7 @@ async def list_devices():
 async def startup_event():
     """Initialize device manager on startup"""
     try:
-        await device_manager.fetch_devices()
+        await device_manager.load_or_fetch_devices()
         logger.info(f"Loaded {len(device_manager.devices_by_room)} rooms with devices")
     except Exception as e:
         logger.error(f"Startup error: {e}")

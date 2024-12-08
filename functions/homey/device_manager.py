@@ -14,7 +14,13 @@ class HomeyDeviceManager:
         self.cache_file = Path("data/homey/devices.json")
         self.cache_file.parent.mkdir(parents=True, exist_ok=True)
         self.devices_by_room = {}
-        self.load_or_fetch_devices()
+
+    async def load_or_fetch_devices(self) -> None:
+        """Load devices from cache or fetch new"""
+        if self.cache_file.exists():
+            self.devices_by_room = json.loads(self.cache_file.read_text())
+        else:
+            await self.fetch_devices()
 
     async def fetch_devices(self) -> None:
         """Fetch all devices from Homey API"""
@@ -45,13 +51,6 @@ class HomeyDeviceManager:
         except Exception as e:
             logger.error(f"Error fetching devices: {e}")
             raise
-
-    def load_or_fetch_devices(self) -> None:
-        """Load devices from cache or fetch new"""
-        if self.cache_file.exists():
-            self.devices_by_room = json.loads(self.cache_file.read_text())
-        else:
-            await self.fetch_devices()
 
     def get_room_devices(self, room: str) -> List[Dict]:
         """Get all devices in a room"""
