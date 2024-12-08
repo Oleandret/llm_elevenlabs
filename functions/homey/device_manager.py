@@ -31,39 +31,52 @@ class HomeyDeviceManager:
                     headers={"Authorization": f"Bearer {self.token}"}
                 )
                 
-                # Log raw response for debugging
-                logger.debug(f"Raw response: {response.text}")
+                # Log raw response
+                logger.debug(f"Response status: {response.status_code}")
+                logger.debug(f"Response text: {response.text[:200]}...")
                 
                 # Ensure valid response
                 response.raise_for_status()
                 
-                # Parse response - might be string or dict
                 try:
+                    # Parse JSON and ensure it's a list/dict
                     data = response.json()
-                    logger.debug(f"Parsed data type: {type(data)}")
-                    logger.debug(f"Data sample: {str(data)[:200]}...")
-                    
-                    # Convert string to dict if needed
                     if isinstance(data, str):
                         data = json.loads(data)
                     
-                    # Flatten and organize devices
+                    logger.debug(f"Parsed data type: {type(data)}")
+                    
+                    # Initialize rooms dict
                     self.devices_by_room = {}
-                    for device in data:
-                        room = device.get("zone", {}).get("name", "unknown")
+                    
+                    # Handle both list and dict responses
+                    devices = data if isinstance(data, list) else [data]
+                    
+                    for device in devices:
+                        if not isinstance(device, dict):
+                            logger.warning(f"Skipping invalid device: {device}")
+                            continue
+                            
+                        # Extract room and device info
+                        room = "unknown"
+                        if isinstance(device.get("zone"), dict):
+                            room = device["zone"].get("name", "unknown")
+                        
+                        # Initialize room if needed
                         if room not in self.devices_by_room:
                             self.devices_by_room[room] = []
                         
+                        # Add device info
                         self.devices_by_room[room].append({
-                            "id": device.get("id"),
-                            "name": device.get("name"),
-                            "type": device.get("class"),
+                            "id": device.get("id", "unknown"),
+                            "name": device.get("name", "unknown"),
+                            "type": device.get("class", "unknown"),
                             "capabilities": device.get("capabilities", [])
                         })
                     
                     # Cache results
                     self.cache_file.write_text(json.dumps(self.devices_by_room, indent=2))
-                    logger.info(f"Cached devices for {len(self.devices_by_room)} rooms")
+                    logger.info(f"Cached {sum(len(devices) for devices in self.devices_by_room.values())} devices in {len(self.devices_by_room)} rooms")
                     
                 except json.JSONDecodeError as e:
                     logger.error(f"JSON parse error: {str(e)}")
