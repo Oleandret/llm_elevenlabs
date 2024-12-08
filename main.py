@@ -208,6 +208,51 @@ async def chat(message: str):
         logger.error(f"Chat error: {str(e)}")
         return {"response": "Beklager, det oppstod en feil."}
 
+async def detect_context(message: str, messages: List[Message]) -> Optional[str]:
+    """Enhanced context detection"""
+    smart_home_keywords = ["lys", "varme", "flow", "homey", "styr", "skru", "rom"]
+    
+    # Check current message
+    if any(keyword in message.lower() for keyword in smart_home_keywords):
+        return "smarthus"
+        
+    # Check conversation history for context
+    recent_messages = messages[-3:] if len(messages) > 3 else messages
+    for msg in recent_messages:
+        if any(keyword in msg.content.lower() for keyword in smart_home_keywords):
+            return "smarthus"
+            
+    return None
+
+async def handle_smart_home(message: str, context: str) -> Optional[str]:
+    """Handle smart home specific commands"""
+    try:
+        # Check if room needs to be determined
+        if not getattr(handle_smart_home, 'current_room', None):
+            rooms = ["stue", "kjøkken", "soverom"]
+            if any(room in message.lower() for room in rooms):
+                handle_smart_home.current_room = next(
+                    room for room in rooms if room in message.lower()
+                )
+            else:
+                return "Hvilket rom vil du styre? (stue/kjøkken/soverom)"
+        
+        # Try to execute function with room context
+        function_response = await function_registry.handle_command(
+            f"{message} i {handle_smart_home.current_room}"
+        )
+        
+        if function_response:
+            return function_response
+            
+        # Reset room if command failed
+        handle_smart_home.current_room = None
+        return None
+        
+    except Exception as e:
+        logger.error(f"Smart home error: {str(e)}")
+        return None
+
 @app.post("/v1/chat/completions")
 async def create_chat_completion(request: ChatCompletionRequest):
     try:
@@ -246,15 +291,8 @@ async def create_chat_completion(request: ChatCompletionRequest):
             request_data["user"] = request_data.pop("user_id")
 
         request_data = await adjust_max_tokens(request_data)
-        completion = await client.chat.completions.create(
-            model=request_data['model'],
-            messages=request_data['messages'],
-            temperature=request_data.get('temperature', 0.7),
-            max_tokens=request_data.get('max_tokens'),
-            stream=request_data.get('stream', False),
-            user=request_data.get('user')
-        )
-        return completion.to_dict()
+        completion = await client.chat.completions.create(**request_data)
+        
         if request_data.get("stream", False):
             return StreamingResponse(
                 stream_gpt_response(completion),
