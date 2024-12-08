@@ -11,11 +11,11 @@ class HomeyKjokkenTaklys(BaseFunction):
         self.base_url = "https://64f5c8926da3f17a12bc9c7c.connect.athom.com/api/manager/devices/device"
         self.token = os.getenv("HOMEY_API_TOKEN")
         self.device_id = "a742676e-df11-49f1-ad84-184cd2c0850c"
-        self.name = "Taklys på kjøkken"
+        self.device_name = "Taklys på kjøkken"  # Endret fra self.name til self.device_name
 
     @property
     def name(self) -> str:
-        return "kjokken_taklys"
+        return "kjokken_taklys"  # Dette er funksjonens unike identifikator
 
     @property
     def descriptions(self) -> List[str]:
@@ -49,10 +49,9 @@ class HomeyKjokkenTaklys(BaseFunction):
                                 headers=headers,
                                 json={"value": num/100}
                             )
-                            return f"Taklyset på kjøkkenet er satt til {num}%"
+                            return f"{self.device_name} er satt til {num}%"
                     
-                    # Hvis ingen prosent er spesifisert
-                    return "Hvor mange prosent vil du dimme taklyset på kjøkkenet til?"
+                    return f"Hvor mange prosent vil du dimme {self.device_name.lower()} til?"
 
                 # Håndter av/på
                 if any(word in command for word in ["slå av", "skru av", "av"]):
@@ -61,7 +60,7 @@ class HomeyKjokkenTaklys(BaseFunction):
                         headers=headers,
                         json={"value": False}
                     )
-                    return "Taklyset på kjøkkenet er slått av"
+                    return f"{self.device_name} er slått av"
 
                 if any(word in command for word in ["slå på", "skru på", "på"]):
                     await client.put(
@@ -69,10 +68,10 @@ class HomeyKjokkenTaklys(BaseFunction):
                         headers=headers,
                         json={"value": True}
                     )
-                    return "Taklyset på kjøkkenet er slått på"
+                    return f"{self.device_name} er slått på"
 
-                return "Vil du slå av, slå på, eller dimme taklyset på kjøkkenet?"
+                return f"Vil du slå av, slå på, eller dimme {self.device_name.lower()}?"
 
         except Exception as e:
-            logger.error(f"Feil ved styring av kjøkkentaklys: {str(e)}")
-            return f"Beklager, kunne ikke styre taklyset på kjøkkenet: {str(e)}"
+            logger.error(f"Feil ved styring av {self.device_name.lower()}: {str(e)}")
+            return f"Beklager, kunne ikke styre {self.device_name.lower()}: {str(e)}"
