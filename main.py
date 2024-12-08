@@ -331,24 +331,19 @@ def load_functions() -> None:
         except Exception as e:
             logger.error(f"Error instantiating {name}: {e}")
 
-port = int(os.getenv("PORT", 8000))
-limit_max_requests = 100 if os.getenv("ENV", "development") == "development" else None
-backlog = 2048 if os.getenv("ENV", "development") == "development" else None
-
 if __name__ == "__main__":
-    uvicorn.run(
-        "main:app",
-        host="0.0.0.0",
-        port=port,
-        reload=True,
-        access_log=True,
-        workers=1,
-        timeout_notify=30,
-        limit_concurrency=1,
-        limit_max_requests=limit_max_requests,
-        root_path="",
-        backlog=backlog,
-        forwarded_allow_ips="*" if os.getenv("ENV", "development") == "development" else None,
-        proxy_headers=os.getenv("ENV", "development") == "development"
-    )
-        proxy_headers=True  # Set proxy_headers to True for local development
+    import uvicorn
+    
+    port = int(os.getenv("PORT", 8080))
+    
+    config = {
+        "host": "0.0.0.0",
+        "port": port,
+        "log_level": "info",
+        "reload": True,
+        "proxy_headers": True,
+        "forwarded_allow_ips": "*"
+    }
+    
+    print(f"Starting server on port {port}")
+    uvicorn.run("main:app", **config)
