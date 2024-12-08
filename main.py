@@ -335,6 +335,20 @@ async def reload_functions():
         "functions_loaded": len(function_registry.get_all_functions())
     }
 
+@app.get("/devices")
+async def list_devices():
+    """Endpoint to view all Homey devices"""
+    try:
+        device_manager = HomeyDeviceManager()
+        return {
+            "devices": device_manager.devices_by_room,
+            "total_rooms": len(device_manager.devices_by_room),
+            "cache_path": str(device_manager.cache_file)
+        }
+    except Exception as e:
+        logger.error(f"Error fetching devices: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 def load_functions() -> None:
     """Load all functions from /functions directory"""
     functions_path = Path(__file__).parent / "functions"
