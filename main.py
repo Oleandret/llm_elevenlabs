@@ -542,3 +542,82 @@ async def create_chat_completion(request: ChatCompletionRequest):
     except Exception as e:
         logger.error(f"Error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+class SmartHomeContext:
+    def __init__(self):
+        self.room: Optional[str] = None
+        self.action: Optional[str] = None
+        self.value: Optional[float] = None
+        self.conversation_history: List[str] = []
+        
+    def update_from_message(self, message: str) -> bool:
+        """Update context from message"""
+        message = message.lower()
+        
+        # Room detection
+        rooms = {"stue": ["stue", "stua"], 
+                "kjøkken": ["kjøkken", "kjøkkenet"],
+                "soverom": ["soverom", "soverommet"]}
+                
+        for room, variants in rooms.items():
+            if any(v in message for v in variants):
+                self.room = room
+                return True
+                
+        # Action detection
+        if "dim" in message or "%" in message:
+            self.action = "dim"
+            # Extract percentage
+            import re
+            if match := re.search(r"(\d+)%", message):
+                self.value = float(match.group(1))
+            return True
+            
+        if any(w in message for w in ["på", "start"]):
+            self.action = "on"
+            return True
+            
+        if any(w in message for w in ["av", "slukk"]):
+            self.action = "off"  
+            return True
+            
+        return False
+
+    def get_next_prompt(self) -> str:
+        """Get next question based on current state"""
+        if not self.room:
+            return "Hvilket rom vil du styre? (stue/kjøkken/soverom)"
+        if not self.action:
+            return f"Hva vil du gjøre med lyset i {self.room}? (på/av/dimme)"
+        if self.action == "dim" and self.value is None:
+            return "Hvor mange prosent vil du dimme til? (0-100%)"
+        return None
+
+# Update chat handler
+async def handle_chat(message: str):
+    # Get or create context
+    context = getattr(handle_chat, 'context', None)
+    if not context:
+        handle_chat.context = SmartHomeContext()
+    context = handle_chat.context
+    
+    # Add to history
+    context.conversation_history.append(message)
+    
+    # Try to update context
+    if context.update_from_message(message):
+        # If we have complete command, execute it
+        if all([context.room, context.action]):
+            command = f"{context.action} {context.room}"
+            if context.value is not None:
+                command += f" {context.value}%"
+                
+            result = await function_registry.handle_command(command)
+            handle_chat.context = None  # Reset context
+            return result
+            
+        # Otherwise get next prompt
+        return context.get_next_prompt()
+        
+    # If no smart home intent, use GPT
+    return await get_chat_completion(message)
