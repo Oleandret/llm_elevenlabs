@@ -9,49 +9,72 @@ logger = logging.getLogger(__name__)
 
 class HomeyLights(BaseFunction):
     def __init__(self):
-        self.base_url = "https://64f5c8926da3f17a12bc9c7c.connect.athom.com/api"  # Real Homey ID
+        self.base_url = "https://64f5c8926da3f17a12bc9c7c.connect.athom.com/api/manager/devices/device"
         self.token = os.getenv("HOMEY_API_TOKEN")
-        self.room_mapping = {
-            "stue": "living-room",
-            "kjøkken": "kitchen",
-            "soverom": "bedroom"
+        self.device_id = "77535dea-499b-4a63-9e4b-3e3184763ece"
+        self.room = "stuen i hovedetasjen"
+        self.state = {
+            "room": self.room,
+            "action": None,
+            "value": None
         }
 
-    async def execute_command(self, room: str, action: str, value: Optional[float] = None) -> str:
+    async def execute_command(self, command_type: str, value: Optional[float] = None) -> str:
         try:
             async with httpx.AsyncClient() as client:
                 headers = {"Authorization": f"Bearer {self.token}"}
                 
-                if action == "dim":
-                    data = {"brightness": value}
+                if command_type == "DIM":
+                    endpoint = f"{self.base_url}/{self.device_id}/capabilities/dim"
+                    data = {"value": value / 100}  # Convert percentage to 0-1
                 else:
-                    data = {"on": action == "on"}
-                    
-                response = await client.post(
-                    f"{self.base_url}/devices/{self.room_mapping[room]}/state",
-                    headers=headers,
-                    json=data
-                )
+                    endpoint = f"{self.base_url}/{self.device_id}/capabilities/onoff"
+                    data = {"value": command_type == "ON"}
+
+                response = await client.put(endpoint, headers=headers, json=data)
+                response.raise_for_status()
                 
-                if response.status_code == 200:
-                    return f"Lys i {room} er {'dimmet' if action == 'dim' else 'skrudd ' + action}"
-                else:
-                    raise Exception(f"API error: {response.status_code}")
-                    
+                action_text = "dimmet til {:.0f}%".format(value) if command_type == "DIM" else \
+                            "skrudd på" if command_type == "ON" else "skrudd av"
+                return f"Lyset i {self.room} er {action_text}"
+                
         except Exception as e:
-            logger.error(f"Homey API error: {e}")
+            logger.error(f"API error: {str(e)}")
             return f"Beklager, kunne ikke styre lyset: {str(e)}"
 
     async def handle_command(self, message: str) -> str:
-        context = self.parse_command(message)
-        if not context.get("room") or not context.get("action"):
-            return "Vennligst spesifiser rom og handling (på/av/dimme)"
+        try:
+            command_type = self.parse_command_type(message.lower())
+            if not command_type:
+                return "Vennligst spesifiser om du vil skru på, av eller dimme lyset"
+                
+            if command_type == "DIM":
+                dim_value = self.extract_dim_value(message)
+                if dim_value is None:
+                    return "Vennligst spesifiser dimme-verdi i prosent (0-100%)"
+                return await self.execute_command(command_type, dim_value)
             
-        return await self.execute_command(
-            context["room"],
-            context["action"],
-            context.get("value")
-        )
+            return await self.execute_command(command_type)
+            
+        except Exception as e:
+            logger.error(f"Command error: {str(e)}")
+            return f"Beklager, kunne ikke utføre kommandoen: {str(e)}"
+
+    def parse_command_type(self, message: str) -> Optional[str]:
+        if any(x in message for x in ["dim", "prosent", "%"]):
+            return "DIM"
+        if any(x in message for x in ["på", "start", "tenn"]):
+            return "ON"
+        if any(x in message for x in ["av", "slukk", "stopp"]):
+            return "OFF"
+        return None
+
+    def extract_dim_value(self, message: str) -> Optional[float]:
+        import re
+        if match := re.search(r"(\d+)%?", message):
+            value = float(match.group(1))
+            return min(max(value, 0), 100)
+        return None
 
     @property
     def name(self) -> str:
@@ -74,7 +97,7 @@ class HomeyLights(BaseFunction):
             "slå på taklys", "skru på taklys",
             "slå på lys", "skru på lys",
             "tenn lys", "tenn taklys",
-            "p�� med lys", "på med taklys",
+            "på med lys", "på med taklys",
             "lys på", "taklys på",
             
             # Dimming kommandoer
