@@ -5,6 +5,7 @@ from .function_base import BaseFunction
 from .homey.lights import HomeyLights
 from .homey.flows import HomeyFlows
 from .homey.kjokken_lys import HomeyKjokkenLights
+from .homey.kjokken_taklys import HomeyKjokkenTaklys
 
 logger = logging.getLogger(__name__)
 
@@ -13,7 +14,7 @@ def get_all_functions() -> Dict[str, BaseFunction]:
     functions = {}
     
     try:
-        # Initialiser Lights
+        # Initialiser Lights (stue)
         lights = HomeyLights()
         functions[lights.name] = lights
         logger.info(f"Lastet funksjon: {lights.name}")
@@ -29,11 +30,19 @@ def get_all_functions() -> Dict[str, BaseFunction]:
         logger.error(f"Kunne ikke laste HomeyFlows: {e}")
 
     try:
-        # Initialiser KjokkenLights
+        # Initialiser KjokkenLights (overskapslys)
         kjokken = HomeyKjokkenLights()
         functions[kjokken.name] = kjokken
         logger.info(f"Lastet funksjon: {kjokken.name}")
     except Exception as e:
         logger.error(f"Kunne ikke laste HomeyKjokkenLights: {e}")
+
+    try:
+        # Initialiser KjokkenTaklys
+        kjokken_taklys = HomeyKjokkenTaklys()
+        functions[kjokken_taklys.name] = kjokken_taklys
+        logger.info(f"Lastet funksjon: {kjokken_taklys.name}")
+    except Exception as e:
+        logger.error(f"Kunde ikke laste HomeyKjokkenTaklys: {e}")
     
     return functions
