@@ -194,6 +194,7 @@ async def get_chat_completion(messages: List[dict], user_message: str) -> str:
     except Exception as e:
         logger.error(f"OpenAI API error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/chat")
 async def chat(request: ChatCompletionRequest):
     response = await get_chat_completion(request.messages, request.messages[-1].content)
@@ -347,3 +348,67 @@ if __name__ == "__main__":
     
     print(f"Starting server on port {port}")
     uvicorn.run("main:app", **config)
+
+from typing import Optional, Dict
+from pydantic import BaseModel
+
+class ConversationState:
+    def __init__(self):
+        self.current_context: Optional[str] = None
+        self.current_room: Optional[str] = None
+        self.last_function: Optional[str] = None
+
+class ChatState(BaseModel):
+    context: Optional[str] = None
+    room: Optional[str] = None
+    function: Optional[str] = None
+
+# Initialize state
+conversation_state = ConversationState()
+
+def detect_context(message: str) -> Optional[str]:
+    """Detect context from message"""
+    smart_home_keywords = ["lys", "varme", "flow", "homey", "styr", "skru"]
+    if any(keyword in message.lower() for keyword in smart_home_keywords):
+        return "smarthus"
+    return None
+
+async def handle_chat(message: str):
+    context = detect_context(message)
+    
+    # If no context set, try to determine it
+    if not conversation_state.current_context:
+        if context:
+            conversation_state.current_context = context
+            return {
+                "response": "Jeg ser du vil styre smarthuset. Hvilket rom befinner du deg i? (stue/kjøkken/soverom)",
+                "requires_followup": True
+            }
+    
+    # If no room set but context is smarthus
+    if conversation_state.current_context == "smarthus" and not conversation_state.current_room:
+        rooms = ["stue", "kjøkken", "soverom"]
+        if any(room in message.lower() for room in rooms):
+            conversation_state.current_room = next(room for room in rooms if room in message.lower())
+            return {
+                "response": f"Ok, du er i {conversation_state.current_room}. Hva vil du gjøre?",
+                "requires_followup": True
+            }
+    
+    # If we have both context and room, try to execute function
+    if conversation_state.current_context and conversation_state.current_room:
+        for func in function_registry.get_all_functions().values():
+            if func.can_handle(message):
+                result = await func.handle_command(message)
+                return {
+                    "response": result,
+                    "requires_followup": False
+                }
+    
+    # If no function matched, fall back to GPT
+    return await get_chat_completion(message)
+
+@app.post("/chat")
+async def chat(message: str):
+    response = await handle_chat(message)
+    return response
