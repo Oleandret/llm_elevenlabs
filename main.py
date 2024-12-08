@@ -449,3 +449,96 @@ async def handle_chat(message: str):
 async def chat(message: str):
     response = await handle_chat(message)
     return response
+
+class CommandState:
+    def __init__(self):
+        self.room: Optional[str] = None
+        self.action: Optional[str] = None
+        self.value: Optional[float] = None
+        self.confirmed: bool = False
+
+class ConversationHandler:
+    def __init__(self):
+        self.command_state = CommandState()
+        self.rooms = ["stue", "kjøkken", "soverom"]
+        self.actions = ["på", "av", "dimme"]
+    
+    def detect_room(self, message: str) -> Optional[str]:
+        """Find room reference in message"""
+        for room in self.rooms:
+            if room in message.lower() or "stua" in message.lower():
+                return room
+        return None
+
+    def detect_action(self, message: str) -> Optional[str]:
+        """Find action in message"""
+        if "på" in message.lower() or "tenn" in message.lower():
+            return "på"
+        if "av" in message.lower() or "slukk" in message.lower():
+            return "av" 
+        if "dim" in message.lower() or "%" in message.lower():
+            return "dimme"
+        return None
+
+    async def handle_message(self, message: str) -> str:
+        """Progressive conversation handler"""
+        
+        # Try to extract information from message
+        room = self.detect_room(message)
+        action = self.detect_action(message)
+        
+        # Update state
+        if room:
+            self.command_state.room = room
+        if action:
+            self.command_state.action = action
+            
+        # Handle based on current state
+        if not self.command_state.room:
+            return "I hvilket rom vil du styre lyset? (stue/kjøkken/soverom)"
+            
+        if not self.command_state.action:
+            return f"Hva vil du gjøre med lyset i {self.command_state.room}? (skru på/av eller dimme)"
+            
+        if self.command_state.action == "dimme" and not self.command_state.value:
+            if "%" in message:
+                try:
+                    self.command_state.value = float(message.split("%")[0].split()[-1])
+                except:
+                    return "Til hvilken prosent vil du dimme lyset? (0-100%)"
+            else:
+                return "Til hvilken prosent vil du dimme lyset? (0-100%)"
+        
+        # Execute command
+        function_response = await function_registry.handle_command(
+            f"{self.command_state.action} lys {self.command_state.room} "
+            f"{self.command_state.value}%" if self.command_state.value else ""
+        )
+        
+        # Reset state after execution
+        self.command_state = CommandState()
+        return function_response or "Beklager, kunne ikke utføre kommandoen"
+
+# Initialize handler
+conversation_handler = ConversationHandler()
+
+@app.post("/v1/chat/completions")
+async def create_chat_completion(request: ChatCompletionRequest):
+    try:
+        message = request.messages[-1].content
+        
+        # Check for smart home intent
+        if any(word in message.lower() for word in ["lys", "dimme", "skru", "slå"]):
+            response = await conversation_handler.handle_message(message)
+            return {
+                "choices": [{
+                    "message": {"role": "assistant", "content": response}
+                }]
+            }
+            
+        # Fall back to GPT
+        return await handle_gpt_request(request)
+    
+    except Exception as e:
+        logger.error(f"Error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
