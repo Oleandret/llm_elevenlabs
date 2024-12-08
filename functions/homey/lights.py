@@ -9,16 +9,49 @@ logger = logging.getLogger(__name__)
 
 class HomeyLights(BaseFunction):
     def __init__(self):
-        self.rooms = {
-            "stue": "living_room",
+        self.base_url = "https://64f5c8926da3f17a12bc9c7c.connect.athom.com/api"  # Real Homey ID
+        self.token = os.getenv("HOMEY_API_TOKEN")
+        self.room_mapping = {
+            "stue": "living-room",
             "kjøkken": "kitchen",
             "soverom": "bedroom"
         }
-        self.base_url = "https://[homey-id].connect.athom.com/api"
-        self.token = os.getenv("HOMEY_API_TOKEN")
-        self.device_id = "77535dea-499b-4a63-9e4b-3e3184763ece"
-        self.room = "stuen i hovedetasjen"
-        logger.info(f"HomeyLights initialisert for {self.room}")
+
+    async def execute_command(self, room: str, action: str, value: Optional[float] = None) -> str:
+        try:
+            async with httpx.AsyncClient() as client:
+                headers = {"Authorization": f"Bearer {self.token}"}
+                
+                if action == "dim":
+                    data = {"brightness": value}
+                else:
+                    data = {"on": action == "on"}
+                    
+                response = await client.post(
+                    f"{self.base_url}/devices/{self.room_mapping[room]}/state",
+                    headers=headers,
+                    json=data
+                )
+                
+                if response.status_code == 200:
+                    return f"Lys i {room} er {'dimmet' if action == 'dim' else 'skrudd ' + action}"
+                else:
+                    raise Exception(f"API error: {response.status_code}")
+                    
+        except Exception as e:
+            logger.error(f"Homey API error: {e}")
+            return f"Beklager, kunne ikke styre lyset: {str(e)}"
+
+    async def handle_command(self, message: str) -> str:
+        context = self.parse_command(message)
+        if not context.get("room") or not context.get("action"):
+            return "Vennligst spesifiser rom og handling (på/av/dimme)"
+            
+        return await self.execute_command(
+            context["room"],
+            context["action"],
+            context.get("value")
+        )
 
     @property
     def name(self) -> str:
@@ -41,7 +74,7 @@ class HomeyLights(BaseFunction):
             "slå på taklys", "skru på taklys",
             "slå på lys", "skru på lys",
             "tenn lys", "tenn taklys",
-            "på med lys", "på med taklys",
+            "p�� med lys", "på med taklys",
             "lys på", "taklys på",
             
             # Dimming kommandoer
@@ -126,28 +159,6 @@ class HomeyLights(BaseFunction):
             if room_no in command.lower():
                 return room_en
         return None
-
-    async def handle_command(self, command: str) -> str:
-        room = self.detect_room(command)
-        if not room:
-            return "Hvilket rom vil du styre lyset i? (stue/kjøkken/soverom)"
-
-        try:
-            if "på" in command or "skru på" in command:
-                await self.set_light(room, True)
-                return f"Skrudde på lyset i {room}"
-            elif "av" in command or "skru av" in command:
-                await self.set_light(room, False) 
-                return f"Skrudde av lyset i {room}"
-            elif any(x in command for x in ["dim", "prosent", "styrke"]):
-                level = self.extract_level(command)
-                await self.dim_light(room, level)
-                return f"Satte lyset i {room} til {level}%"
-        except Exception as e:
-            logger.error(f"Feil ved styring av lys: {e}")
-            return f"Beklager, kunne ikke styre lyset: {e}"
-
-        return f"Usikker på hva du vil gjøre med lyset i {room}"
 
     async def execute(self, command: str, params: Optional[Dict] = None) -> str:
         logger.info(f"Utfører kommando: {command}")
