@@ -13,6 +13,7 @@ from pathlib import Path
 
 from utils.function_registry import FunctionRegistry
 from functions.homey.flows import HomeyFlows  # Correct import for existing structure
+from functions.homey.device_manager import HomeyDeviceManager  # Add this import
 
 import importlib
 import pkgutil
@@ -51,6 +52,9 @@ app.add_middleware(
 
 # Initialiser function registry
 function_registry = FunctionRegistry()
+
+# Create single instance of HomeyDeviceManager
+device_manager = HomeyDeviceManager()
 
 def load_system_prompt() -> str:
     """Les system prompt fra fil"""
@@ -339,7 +343,8 @@ async def reload_functions():
 async def list_devices():
     """Endpoint to view all Homey devices"""
     try:
-        device_manager = HomeyDeviceManager()
+        # Use existing device_manager instance
+        await device_manager.fetch_devices()  # Force refresh devices
         return {
             "devices": device_manager.devices_by_room,
             "total_rooms": len(device_manager.devices_by_room),
@@ -348,6 +353,15 @@ async def list_devices():
     except Exception as e:
         logger.error(f"Error fetching devices: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize device manager on startup"""
+    try:
+        await device_manager.fetch_devices()
+        logger.info(f"Loaded {len(device_manager.devices_by_room)} rooms with devices")
+    except Exception as e:
+        logger.error(f"Startup error: {e}")
 
 def load_functions() -> None:
     """Load all functions from /functions directory"""
