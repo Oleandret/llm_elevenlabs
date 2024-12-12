@@ -653,26 +653,33 @@ async def handle_chat(message: str):
     return await get_chat_completion(message)
 
 async def handle_message(message: str):
-    # First check for flow commands
-    if any(x in message.lower() for x in ["kjør flow", "start flow", "flow"]):
+    message = message.lower()
+    
+    # Flow commands
+    if any(x in message for x in ["kjør flow", "start flow", "flow", "vis flows", "liste flows"]):
+        flow_handler = function_registry.get_function("homey_flows")
+        if not flow_handler:
+            return "Beklager, flow-håndtering er ikke tilgjengelig"
+            
+        # List flows command
+        if any(x in message for x in ["vis flows", "liste flows", "hvilke flows"]):
+            return await flow_handler.list_flows()
+            
+        # Execute flow command
         try:
-            flow_handler = function_registry.get_function("homey_flows")
-            if flow_handler:
-                return await flow_handler.handle_command(message)
+            return await flow_handler.handle_command(message)
         except Exception as e:
             logger.error(f"Feil ved håndtering av flow: {str(e)}")
             return f"Beklager, kunne ikke utføre flow-kommandoen: {str(e)}"
     
-    # Then check for other commands
+    # Regular command handling
     if is_command(message):
         try:
             response = await function_registry.handle_command(message)
-            if isinstance(response, coroutine):
-                response = await response
             return response
         except Exception as e:
             logger.error(f"Feil ved håndtering av kommando: {str(e)}")
             return f"Beklager, kunne ikke utføre kommandoen: {str(e)}"
-    
-    # If no command recognized, use chat handler
+            
+    # Chat handling
     return await handle_chat(message)

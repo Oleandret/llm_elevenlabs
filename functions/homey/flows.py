@@ -213,27 +213,17 @@ class HomeyFlows(BaseFunction):
         # Sorter etter likhetsscore og returner flows
         return [f[0] for f in sorted(matching_flows, key=lambda x: x[1], reverse=True)]
 
-    async def handle_command(self, command: str) -> Optional[str]:
-        """Forbedret kommandohåndtering"""
-        if not any(pattern in command.lower() for pattern in self.command_patterns):
-            return None
-
-        matching_flows = self.find_matching_flow(command)
-        
-        if not matching_flows:
-            available_flows = "\n".join([f"- {f['name']}" for f in self.flows])
-            logger.info(f"Ingen matching flows funnet. Tilgjengelige flows:\n{available_flows}")
-            return f"Fant ingen matching flows. Tilgjengelige flows:\n{available_flows}"
-
-        try:
-            for flow in matching_flows:
-                logger.info(f"Kjører flow: {flow['name']}")
-                await self.trigger_flow(flow['id'])
+    async def handle_command(self, message: str) -> str:
+        """Handle flow commands"""
+        if "vis" in message or "liste" in message:
+            return await self.list_flows()
             
-            return f"Kjørte flow: {', '.join(f['name'] for f in matching_flows)}"
-        except Exception as e:
-            logger.error(f"Feil ved kjøring av flow: {e}")
-            return f"Beklager, kunne ikke kjøre flow: {str(e)}"
+        # Extract flow name from command
+        flow_name = self.extract_flow_name(message)
+        if not flow_name:
+            return "Vennligst spesifiser hvilken flow du vil kjøre"
+            
+        return await self.start_flow(flow_name)
 
     async def get_available_flows(self) -> List[Dict]:
         """Henter tilgjengelige flows fra Homey API"""
@@ -283,3 +273,16 @@ class HomeyFlows(BaseFunction):
                 return f"Kunne ikke starte flow: {str(e)}"
         else:
             return f"Fant ingen passende flow for: {flow_name}"
+
+    async def list_flows(self) -> str:
+        """List all available flows"""
+        try:
+            flows = await self.get_available_flows()
+            if not flows:
+                return "Ingen flows er tilgjengelige"
+                
+            flow_list = "\n".join([f"- {flow['name']}" for flow in flows])
+            return f"Tilgjengelige flows:\n{flow_list}"
+        except Exception as e:
+            logger.error(f"Feil ved listing av flows: {e}")
+            return "Kunne ikke hente flows liste"
