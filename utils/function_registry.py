@@ -15,9 +15,21 @@ class FunctionRegistry:
                 logger.info(f"Lastet funksjon: {name} med beskrivelser: {func.descriptions}")
         return cls._instance
 
+    def _matches_flow_command(self, command: str) -> bool:
+        flow_indikatorer = [
+            "flow", "flows", "flyt",
+            "kjør flow", "start flow",
+            "automation", "automatisering"
+        ]
+        return any(indikator in command.lower() for indikator in flow_indikatorer)
+
     async def handle_command(self, command: str) -> str:
         """Håndter en kommando ved å finne og utføre riktig funksjon"""
         logger.info(f"Prøver å håndtere kommando: {command}")
+        
+        if self._matches_flow_command(command):
+            return self.functions["homey_flows"].handle_command(command)
+        
         for name, func in self.functions.items():
             logger.info(f"Sjekker funksjon: {name}")
             matches = func.matches_command(command)
