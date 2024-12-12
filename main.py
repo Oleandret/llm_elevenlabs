@@ -653,47 +653,26 @@ async def handle_chat(message: str):
     return await get_chat_completion(message)
 
 async def handle_message(message: str):
+    # First check for flow commands
+    if any(x in message.lower() for x in ["kjør flow", "start flow", "flow"]):
+        try:
+            flow_handler = function_registry.get_function("homey_flows")
+            if flow_handler:
+                return await flow_handler.handle_command(message)
+        except Exception as e:
+            logger.error(f"Feil ved håndtering av flow: {str(e)}")
+            return f"Beklager, kunne ikke utføre flow-kommandoen: {str(e)}"
+    
+    # Then check for other commands
     if is_command(message):
         try:
             response = await function_registry.handle_command(message)
             if isinstance(response, coroutine):
-                response = await response  # Await coroutine
+                response = await response
             return response
         except Exception as e:
             logger.error(f"Feil ved håndtering av kommando: {str(e)}")
             return f"Beklager, kunne ikke utføre kommandoen: {str(e)}"
-
-class CommandType(Enum):
-    LIGHT = "light"
-    FLOW = "flow" 
-    UNKNOWN = "unknown"
-
-def identify_command_type(message: str) -> tuple[CommandType, dict]:
-    message = message.lower()
     
-    if any(x in message for x in ["kjør flow", "start flow", "flow"]):
-        return CommandType.FLOW, {
-            "flow_name": message.split("flow")[-1].strip()
-        }
-    
-    if any(x in message for x in ["lys", "dimme", "skru på", "skru av"]):
-        return CommandType.LIGHT, {
-            "room": extract_room(message),
-            "action": extract_action(message),
-            "value": extract_value(message)
-        }
-        
-    return CommandType.UNKNOWN, {}
-
-async def handle_message(message: str):
-    command_type, params = identify_command_type(message)
-    
-    if command_type == CommandType.FLOW:
-        return await function_registry.get_function("homey_flows").handle_command(message)
-        
-    elif command_type == CommandType.LIGHT:
-        if params["room"] and params["action"]:
-            light_function = function_registry.get_light_function(params["room"])
-            return await light_function.handle_command(message)
-            
+    # If no command recognized, use chat handler
     return await handle_chat(message)
