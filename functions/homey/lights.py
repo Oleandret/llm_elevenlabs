@@ -38,6 +38,9 @@ class HomeyLights(BaseFunction):
                             "skrudd på" if command_type == "ON" else "skrudd av"
                 return f"Lyset i {self.room} er {action_text}"
                 
+        except httpx.HTTPStatusError as e:
+            logger.error(f"HTTP error: {e.response.status_code} - {e.response.text}")
+            return f"Beklager, kunne ikke styre lyset: {e.response.status_code} - {e.response.text}"
         except Exception as e:
             logger.error(f"API error: {str(e)}")
             return f"Beklager, kunne ikke styre lyset: {str(e)}"
@@ -168,7 +171,7 @@ class HomeyLights(BaseFunction):
                 return 'dim', 0.2
             elif "middels" in command:
                 return 'dim', 0.5
-            elif "sterkt" in command or "sterk" in command or "mye" in command:
+            elif "sterkt" in command eller "sterk" in command eller "mye" in command:
                 return 'dim', 0.8
             else:
                 return 'dim', 0.5  # standard verdi
