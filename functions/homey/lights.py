@@ -91,7 +91,7 @@ class HomeyLights(BaseFunction):
             
             # Slå av kommandoer
             "slå av taklys", "skru av taklys", 
-            "slå av lys", "skru av lys",
+            "sl�� av lys", "skru av lys",
             "slukk lys", "slukk taklys",
             "av med lys", "av med taklys",
             "lys av", "taklys av",
@@ -171,7 +171,7 @@ class HomeyLights(BaseFunction):
                 return 'dim', 0.2
             elif "middels" in command:
                 return 'dim', 0.5
-            elif "sterkt" in command eller "sterk" in command eller "mye" in command:
+            elif "sterkt" in command or "sterk" in command or "mye" in command:
                 return 'dim', 0.8
             else:
                 return 'dim', 0.5  # standard verdi
