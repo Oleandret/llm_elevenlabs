@@ -214,16 +214,21 @@ class HomeyFlows(BaseFunction):
         return [f[0] for f in sorted(matching_flows, key=lambda x: x[1], reverse=True)]
 
     async def handle_command(self, message: str) -> str:
-        """Handle flow commands"""
-        if "vis" in message or "liste" in message:
-            return await self.list_flows()
+        try:
+            if any(x in message.lower() for x in ["vis flows", "liste flows", "hvilke flows"]):
+                return await self.list_flows()
+                
+            flow_name = self.extract_flow_name(message)
+            if not flow_name:
+                logger.warning("Ingen flow-navn funnet i melding")
+                return "Vennligst spesifiser hvilken flow du vil kjøre"
+                
+            logger.info(f"Forsøker å kjøre flow: {flow_name}")
+            return await self.start_flow(flow_name)
             
-        # Extract flow name from command
-        flow_name = self.extract_flow_name(message)
-        if not flow_name:
-            return "Vennligst spesifiser hvilken flow du vil kjøre"
-            
-        return await self.start_flow(flow_name)
+        except Exception as e:
+            logger.error(f"Feil i flow-håndtering: {str(e)}")
+            return f"Kunne ikke utføre flow-kommando: {str(e)}"
 
     async def get_available_flows(self) -> List[Dict]:
         """Henter tilgjengelige flows fra Homey API"""
@@ -286,3 +291,13 @@ class HomeyFlows(BaseFunction):
         except Exception as e:
             logger.error(f"Feil ved listing av flows: {e}")
             return "Kunne ikke hente flows liste"
+
+    def extract_flow_name(self, message: str) -> str:
+        """Extract flow name from command message"""
+        # Remove common flow command prefixes
+        for prefix in ["kjør flow", "start flow", "flow"]:
+            if prefix in message.lower():
+                flow_name = message[message.lower().find(prefix) + len(prefix):].strip()
+                flow_name = flow_name.strip(". ")  # Remove dots and extra spaces
+                return flow_name
+        return None
