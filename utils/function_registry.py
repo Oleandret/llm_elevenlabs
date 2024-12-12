@@ -15,6 +15,17 @@ class FunctionRegistry:
                 logger.info(f"Lastet funksjon: {name} med beskrivelser: {func.descriptions}")
         return cls._instance
 
+    def get_function(self, name: str):
+        return self.functions.get(name)
+        
+    def get_light_function(self, room: str):
+        # Map rom til funksjoner
+        room_map = {
+            "stue": "taklys_stue",
+            "kjokken": "kjokken_taklys"
+        }
+        return self.functions.get(room_map.get(room))
+
     def _matches_flow_command(self, command: str) -> bool:
         flow_indikatorer = [
             "flow", "flows", "flyt",
@@ -27,8 +38,10 @@ class FunctionRegistry:
         """Håndter en kommando ved å finne og utføre riktig funksjon"""
         logger.info(f"Prøver å håndtere kommando: {command}")
         
-        if self._matches_flow_command(command):
-            return self.functions["homey_flows"].handle_command(command)
+        if any(flow_indicator in command.lower() for flow_indicator in ["flow", "flyt"]):
+            flow_handler = self.functions.get("homey_flows")
+            if flow_handler:
+                return await flow_handler.handle_command(command)
         
         for name, func in self.functions.items():
             logger.info(f"Sjekker funksjon: {name}")

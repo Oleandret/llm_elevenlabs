@@ -20,6 +20,8 @@ import pkgutil
 import inspect
 from functions.function_base import BaseFunction
 
+from enum import Enum
+
 DEFAULT_SYSTEM_PROMPT = "This is the default system prompt."
 
 # Last miljøvariabler fra .env
@@ -649,3 +651,49 @@ async def handle_chat(message: str):
         
     # If no smart home intent, use GPT
     return await get_chat_completion(message)
+
+async def handle_message(message: str):
+    if is_command(message):
+        try:
+            response = await function_registry.handle_command(message)
+            if isinstance(response, coroutine):
+                response = await response  # Await coroutine
+            return response
+        except Exception as e:
+            logger.error(f"Feil ved håndtering av kommando: {str(e)}")
+            return f"Beklager, kunne ikke utføre kommandoen: {str(e)}"
+
+class CommandType(Enum):
+    LIGHT = "light"
+    FLOW = "flow" 
+    UNKNOWN = "unknown"
+
+def identify_command_type(message: str) -> tuple[CommandType, dict]:
+    message = message.lower()
+    
+    if any(x in message for x in ["kjør flow", "start flow", "flow"]):
+        return CommandType.FLOW, {
+            "flow_name": message.split("flow")[-1].strip()
+        }
+    
+    if any(x in message for x in ["lys", "dimme", "skru på", "skru av"]):
+        return CommandType.LIGHT, {
+            "room": extract_room(message),
+            "action": extract_action(message),
+            "value": extract_value(message)
+        }
+        
+    return CommandType.UNKNOWN, {}
+
+async def handle_message(message: str):
+    command_type, params = identify_command_type(message)
+    
+    if command_type == CommandType.FLOW:
+        return await function_registry.get_function("homey_flows").handle_command(message)
+        
+    elif command_type == CommandType.LIGHT:
+        if params["room"] and params["action"]:
+            light_function = function_registry.get_light_function(params["room"])
+            return await light_function.handle_command(message)
+            
+    return await handle_chat(message)

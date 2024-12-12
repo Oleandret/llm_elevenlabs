@@ -234,3 +234,52 @@ class HomeyFlows(BaseFunction):
         except Exception as e:
             logger.error(f"Feil ved kjøring av flow: {e}")
             return f"Beklager, kunne ikke kjøre flow: {str(e)}"
+
+    async def get_available_flows(self) -> List[Dict]:
+        """Henter tilgjengelige flows fra Homey API"""
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    self.base_url,
+                    headers={"Authorization": f"Bearer {self.token}"}
+                )
+                response.raise_for_status()
+                flows = response.json()
+                
+                # Lagre til flows.json
+                self.flows_file.write_text(json.dumps(flows, indent=2))
+                self.last_update = datetime.now()
+                return flows
+                
+        except Exception as e:
+            logger.error(f"Feil ved henting av flows: {e}")
+            return self.load_flows()  # Fallback til cached flows
+
+    async def start_flow(self, flow_name: str) -> str:
+        """Starter en spesifikk flow"""
+        flows = self.load_flows()
+        
+        # Finn beste match for flow-navnet
+        best_match = None
+        best_ratio = 0
+        
+        for flow in flows:
+            ratio = SequenceMatcher(None, flow_name.lower(), flow["name"].lower()).ratio()
+            if ratio > best_ratio and ratio > 0.6:
+                best_ratio = ratio
+                best_match = flow
+                
+        if best_match:
+            try:
+                async with httpx.AsyncClient() as client:
+                    response = await client.post(
+                        f"{self.base_url}/{best_match['id']}/trigger",
+                        headers={"Authorization": f"Bearer {self.token}"}
+                    )
+                    response.raise_for_status()
+                    return f"Startet flow: {best_match['name']}"
+            except Exception as e:
+                logger.error(f"Feil ved starting av flow: {e}")
+                return f"Kunne ikke starte flow: {str(e)}"
+        else:
+            return f"Fant ingen passende flow for: {flow_name}"
