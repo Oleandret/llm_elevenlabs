@@ -17,12 +17,32 @@ class HomeyFlows(BaseFunction):
         self.flows_file = Path("data/homey/flows.json")
         self.flows_file.parent.mkdir(parents=True, exist_ok=True)
         self.last_update = None
-        self.flows = self.load_flows()
-        self.command_patterns = [
-            "start flow", "kjør flow", "aktiver flow",
-            "start scene", "kjør scene", "start automation",
-            "slå på", "skru på", "trigger"
-        ]
+        self.flows = []  # Initialize empty flows list
+        self.refresh_flows()  # Load flows at startup
+
+    async def refresh_flows(self):
+        """Oppdater flows fra Homey API"""
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    self.base_url,
+                    headers={"Authorization": f"Bearer {self.token}"}
+                )
+                response.raise_for_status()
+                self.flows = response.json()
+                logger.info(f"Lastet {len(self.flows)} flows fra Homey")
+                
+                # Cache flows
+                with open(self.flows_file, 'w') as f:
+                    json.dump(self.flows, f, indent=2)
+                    
+        except Exception as e:
+            logger.error(f"Kunne ikke laste flows: {e}")
+            # Try loading from cache
+            if self.flows_file.exists():
+                with open(self.flows_file) as f:
+                    self.flows = json.load(f)
+                    logger.info(f"Lastet {len(self.flows)} flows fra cache")
 
     @property
     def name(self) -> str:
@@ -252,14 +272,15 @@ class HomeyFlows(BaseFunction):
 
     async def start_flow(self, flow_name: str) -> str:
         """Starter en spesifikk flow"""
-        flows = self.load_flows()
-        
-        # Finn beste match for flow-navnet
+        if not self.flows:
+            await self.refresh_flows()
+            
+        # Find best matching flow
         best_match = None
         best_ratio = 0
         
-        for flow in flows:
-            ratio = SequenceMatcher(None, flow_name.lower(), flow["name"].lower()).ratio()
+        for flow in self.flows:
+            ratio = SequenceMatcher(None, flow_name.lower(), flow['name'].lower()).ratio()
             if ratio > best_ratio and ratio > 0.6:
                 best_ratio = ratio
                 best_match = flow
@@ -272,12 +293,14 @@ class HomeyFlows(BaseFunction):
                         headers={"Authorization": f"Bearer {self.token}"}
                     )
                     response.raise_for_status()
+                    logger.info(f"Startet flow: {best_match['name']}")
                     return f"Startet flow: {best_match['name']}"
             except Exception as e:
-                logger.error(f"Feil ved starting av flow: {e}")
+                logger.error(f"Kunne ikke starte flow: {e}")
                 return f"Kunne ikke starte flow: {str(e)}"
         else:
-            return f"Fant ingen passende flow for: {flow_name}"
+            flow_list = "\n".join([f"- {f['name']}" for f in self.flows])
+            return f"Fant ingen matching flow. Tilgjengelige flows:\n{flow_list}"
 
     async def list_flows(self) -> str:
         """List all available flows"""

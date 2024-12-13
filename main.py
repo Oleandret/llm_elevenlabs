@@ -5,7 +5,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Union, Literal
 from openai import AsyncClient
 from dotenv import load_dotenv
 import uvicorn
@@ -683,3 +683,81 @@ async def handle_message(message: str):
             
     # Chat handling
     return await handle_chat(message)
+
+CommandResult = Union[str, None]
+
+from enum import Enum
+from dataclasses import dataclass
+from typing import Optional, List, Dict, Any
+
+class CommandType(Enum):
+    FLOW = "flow"
+    LIGHT = "light"
+    UNKNOWN = "unknown"
+
+@dataclass
+class CommandContext:
+    type: CommandType
+    action: str
+    params: Dict[str, Any] = None
+    confidence: float = 0.0
+
+class CommandProcessor:
+    def __init__(self):
+        self.function_registry = FunctionRegistry()
+        self.conversation_history: List[str] = []
+
+    def detect_command(self, message: str) -> CommandContext:
+        message = message.lower()
+        
+        # Flow detection
+        if any(x in message for x in ["kjør flow", "start flow", "flow"]):
+            return CommandContext(
+                type=CommandType.FLOW,
+                action="start" if any(x in message for x in ["kjør", "start"]) else "list",
+                params={"name": message.split("flow")[-1].strip() if "flow" in message else None},
+                confidence=0.9
+            )
+            
+        # Light detection
+        if any(x in message for x in ["lys", "dimme", "skru"]):
+            return CommandContext(
+                type=CommandType.LIGHT, 
+                action="control",
+                params=self._extract_light_params(message),
+                confidence=0.8
+            )
+            
+        return CommandContext(type=CommandType.UNKNOWN, action="chat")
+
+    async def handle_message(self, message: str) -> str:
+        self.conversation_history.append(message)
+        command = self.detect_command(message)
+
+        try:
+            if command.type == CommandType.FLOW:
+                return await self._handle_flow(command)
+            elif command.type == CommandType.LIGHT:
+                return await self._handle_light(command)
+            else:
+                return await self._handle_chat(message)
+                
+        except Exception as e:
+            logger.error(f"Feil ved håndtering av kommando: {e}")
+            return f"Beklager, kunne ikke utføre kommandoen: {str(e)}"
+
+    async def _handle_flow(self, command: CommandContext) -> str:
+        flow_handler = self.function_registry.get_function("homey_flows")
+        if not flow_handler:
+            return "Beklager, flow-håndtering er ikke tilgjengelig"
+            
+        if command.action == "list":
+            return await flow_handler.list_flows()
+        elif command.params.get("name"):
+            return await flow_handler.start_flow(command.params["name"])
+            
+        return "Vennligst spesifiser hvilken flow du vil kjøre"
+
+    def _extract_light_params(self, message: str) -> Dict[str, Any]:
+        # Add light parameter extraction logic here
+        return {}
